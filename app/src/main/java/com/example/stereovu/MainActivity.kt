@@ -172,19 +172,41 @@ class MainActivity : Activity() {
         }
         container.addView(spinner)
 
-        // 6. Peak LED színe (Colored Peak)
-        val coloredPeakSwitch = Switch(this).apply {
-            text = "Peak LED a sáv színével egyezzen"
+        // 6. Peak LED színe - JAVÍTOTT 4 opció
+        val peakLabel = TextView(this).apply {
+            text = "Peak LED színe"
             setTextColor(Color.parseColor("#E0E0E0"))
             textSize = 15f
-            setPadding(0, 32, 0, 16)
-            isChecked = prefs.getBoolean("colored_peak", false)
-            setOnCheckedChangeListener { _, isChecked ->
-                prefs.edit().putBoolean("colored_peak", isChecked).apply()
+            setPadding(0, 32, 0, 8)
+        }
+        container.addView(peakLabel)
+
+        val peakOptions = arrayOf(
+            "Fehér (klasszikus)",
+            "Színes (LED színével egyező)",
+            "Fix sárga (jól látható)",
+            "Fix cián (minden témán látszik)"
+        )
+        val peakSpinner = Spinner(this).apply {
+            val adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, peakOptions).apply {
+                setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
             }
+            this.adapter = adapter
+            // backward compat: régi bool -> új int
+            val oldMode = if (prefs.contains("peak_mode")) prefs.getInt("peak_mode", 0)
+                          else if (prefs.getBoolean("colored_peak", false)) 1 else 0
+            setSelection(oldMode)
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    prefs.edit().putInt("peak_mode", position).apply()
+                }
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
+            }
+            setBackgroundColor(Color.parseColor("#252525"))
+            setPadding(24, 24, 24, 24)
             layoutParams = layoutParamsMatch
         }
-        container.addView(coloredPeakSwitch)
+        container.addView(peakSpinner)
 
         // Elválasztó tér
         val spacer = View(this).apply {
