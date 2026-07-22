@@ -1,0 +1,19 @@
+node_modules/
+build/
+dist/
+coverage/
+.DS_Store
+*.log
+.env*
+!.env.example
+
+# Gradle files
+.gradle/
+/local.properties
+/out/
+.idea/
+*.apk
+*.aar
+
+# App build files
+app/build/

@@ -1,0 +1,6 @@
+{
+  "name": "Stereo VU",
+  "description": "Floating Stereo VU Meter Overlay for Android with Playback Capture and peak hold.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

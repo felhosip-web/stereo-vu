@@ -1,0 +1,41 @@
+name: Build Linux Binary
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y portaudio19-dev libasound2-dev libqt6gui6 libqt6core6 libqt6widgets6
+
+      - name: Install Python dependencies
+        run: |
+          pip install -r linux/requirements.txt
+          pip install pyinstaller
+
+      - name: Build binary with PyInstaller
+        run: |
+          cd linux
+          pyinstaller --onefile --windowed --name stereo-vu stereo_vu.py
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stereo-vu-linux
+          path: linux/dist/stereo-vu
