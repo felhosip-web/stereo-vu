@@ -250,7 +250,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
             }
             // peak hold pötty
             if (idxFromBottom == peakLed && peakLed > 0) {
-                val peakRect = RectF(x-2, top-1, x+w+2, top+h+1)
+                val peakRect = RectF(x-2f, top-1f, x+w+2f, top+h+1f)
                 if (coloredPeak) {
                     val peakPaint = if (isRed) paintRed else paintGreen
                     c.drawRoundRect(peakRect, 4f, 4f, peakPaint)
@@ -264,7 +264,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
             }
         }
     }
-}aintRed.color     = Color.parseColor("#FF3300")
+}Red.color     = Color.parseColor("#FF3300")
                 paintOffGreen.color  = Color.parseColor("#1A1100")
                 paintOffYellow.color = Color.parseColor("#1A0900")
                 paintOffRed.color    = Color.parseColor("#1A0500")
