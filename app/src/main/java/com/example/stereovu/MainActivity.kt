@@ -144,6 +144,30 @@ class MainActivity : Activity() {
             prefKey = "led_count"
         )
 
+        // 1d. Amplitude Count (Referencia szint)
+        addIntSlider(
+            container,
+            layoutParamsMatch,
+            labelPrefix = "Amplitude Count (Max jelszint)",
+            minVal = 2000,
+            maxVal = 32767,
+            defaultVal = 32767,
+            prefKey = "amplitude_count"
+        )
+
+        // 1e. Szigorú Aluláteresztő Szűrő (LPF)
+        val lpfCheckbox = CheckBox(this).apply {
+            text = "Szigorú Digitális Aluláteresztő Szűrő (LPF)"
+            setTextColor(Color.parseColor("#E0E0E0"))
+            textSize = 15f
+            isChecked = prefs.getBoolean("use_lpf", false)
+            setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean("use_lpf", isChecked).apply()
+            }
+            layoutParams = layoutParamsMatch
+        }
+        container.addView(lpfCheckbox)
+
         // 2. Érzékenység (Gain)
         addSlider(
             container,
@@ -196,6 +220,33 @@ class MainActivity : Activity() {
         container.addView(opacitySeekBar)
 
         // 5. Színséma (Color Theme)
+        val orientLabel = TextView(this).apply {
+            text = "Kijelző Iránya"
+            setTextColor(Color.parseColor("#E0E0E0"))
+            textSize = 15f
+            setPadding(0, 16, 0, 8)
+        }
+        container.addView(orientLabel)
+
+        val orients = arrayOf("Függőleges (Vertical)", "Vízszintes (Horizontal)")
+        val orientSpinner = Spinner(this).apply {
+            val adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, orients).apply {
+                setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            this.adapter = adapter
+            setSelection(if (prefs.getBoolean("horizontal", false)) 1 else 0)
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    prefs.edit().putBoolean("horizontal", position == 1).apply()
+                }
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
+            }
+            setBackgroundColor(Color.parseColor("#252525"))
+            setPadding(24, 24, 24, 24)
+            layoutParams = layoutParamsMatch
+        }
+        container.addView(orientSpinner)
+
         val themeLabel = TextView(this).apply {
             text = "Színséma kiválasztása"
             setTextColor(Color.parseColor("#E0E0E0"))
@@ -209,7 +260,8 @@ class MainActivity : Activity() {
             "Cyberpunk (Neon Kék-Rózsaszín)",
             "Tűz (Sárga-Narancs-Vörös)",
             "Jég (Türkiz-Kék-Fehér)",
-            "Naplemente (Arany-Bíbor)"
+            "Naplemente (Arany-Bíbor)",
+            "VFD (Klasszikus Cián)"
         )
         val spinner = Spinner(this).apply {
             val adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, themes).apply {

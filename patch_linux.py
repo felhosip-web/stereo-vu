@@ -27,7 +27,9 @@ class SettingsDialog(QDialog):
         layout.addRow("LED-ek száma (10-40):", self.led_slider)
         
         self.theme_combo = QComboBox()
-        self.theme_combo.addItems(["Klasszikus (Zöld-Narancs-Piros)", "Cyberpunk (Neon Kék-Rózsaszín)", "Tűz (Sárga-Narancs-Vörös)", "Jég (Türkiz-Kék-Fehér)", "Naplemente (Arany-Bíbor)", "VFD (Klasszikus Cián)"])
+        self.theme_combo.addItems(["Klasszikus (Zöld-Narancs-Piros)", 
+                                  "Cyberpunk (Neon Kék-Rózsaszín)",
+                                  "Tűz (Sárga-Narancs-Vörös)"])
         self.theme_combo.setCurrentIndex(self.settings.value("theme", 0, type=int))
         layout.addRow("Színséma:", self.theme_combo)
         
@@ -242,16 +244,6 @@ class VuMeter(QWidget):
                 if is_red: base_color = QColor(255, 0, 50)
                 elif is_yellow: base_color = QColor(255, 100, 0)
                 else: base_color = QColor(255, 180, 0)
-            elif self.theme_id == 3: # Ice
-                if is_red: base_color = QColor(255, 255, 255)
-                elif is_yellow: base_color = QColor(136, 221, 255)
-                else: base_color = QColor(0, 229, 255)
-            elif self.theme_id == 4: # Sunset
-                if is_red: base_color = QColor(233, 30, 99)
-                elif is_yellow: base_color = QColor(255, 107, 53)
-                else: base_color = QColor(255, 193, 7)
-            elif self.theme_id == 5: # VFD
-                base_color = QColor(0, 229, 255)
             else:
                 if is_red: base_color = QColor(255, 50, 50)
                 elif is_yellow: base_color = QColor(255, 200, 50)

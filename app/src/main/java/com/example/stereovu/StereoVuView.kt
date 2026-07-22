@@ -32,6 +32,8 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     private var attackSpeed = 0.35f
     private var decaySpeed = 0.12f
     private var mode = 0
+    private var useLpf = false
+    private var isHorizontal = false
     private var gain = 1.0f
     private var sizeScale = 1.0f
     private var opacity = 204
@@ -81,11 +83,18 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         // 60fps decay + peak fade loop - EZ MOZGATJA A KIJELZÉST
         postDelayed(object : Runnable {
             override fun run() {
-                if (targetL > levelL) levelL += (targetL - levelL) * attackSpeed
-                else levelL -= (levelL - targetL) * decaySpeed
-
-                if (targetR > levelR) levelR += (targetR - levelR) * attackSpeed
-                else levelR -= (levelR - targetR) * decaySpeed
+                if (useLpf) {
+                    // Szigorú digitális aluláteresztő szűrő (symmetrical 1-pole IIR)
+                    levelL += (targetL - levelL) * attackSpeed
+                    levelR += (targetR - levelR) * attackSpeed
+                } else {
+                    // Aszimmetrikus (klasszikus csúcs / peak)
+                    if (targetL > levelL) levelL += (targetL - levelL) * attackSpeed
+                    else levelL -= (levelL - targetL) * decaySpeed
+    
+                    if (targetR > levelR) levelR += (targetR - levelR) * attackSpeed
+                    else levelR -= (levelR - targetR) * decaySpeed
+                }
 
                 levelL = levelL.coerceIn(0f, 1f)
                 levelR = levelR.coerceIn(0f, 1f)
@@ -146,8 +155,11 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     private fun loadPrefs() {
         val oldScale = sizeScale
         val oldLedCount = ledCount
+        val oldHoriz = isHorizontal
         sizeScale = prefs.getFloat("size_scale", 1.0f)
         ledCount = prefs.getInt("led_count", 20)
+        isHorizontal = prefs.getBoolean("horizontal", false)
+        useLpf = prefs.getBoolean("use_lpf", false)
         
         mode = prefs.getInt("mode", 0)
         when (mode) {
@@ -169,7 +181,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                    else if (prefs.getBoolean("colored_peak", false)) 1 else 0
         setBackgroundColor(Color.argb(opacity, 0, 0, 0))
         updateThemeColors()
-        if (oldScale != sizeScale || oldLedCount != ledCount) {
+        if (oldScale != sizeScale || oldLedCount != ledCount || oldHoriz != isHorizontal) {
             requestLayout()
             params?.let { windowManager?.updateViewLayout(this, it) }
         }
@@ -194,6 +206,12 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                 paintGreen.color = Color.parseColor("#FFC107"); paintYellow.color = Color.parseColor("#FF6B35"); paintRed.color = Color.parseColor("#E91E63")
                 paintOffGreen.color = Color.parseColor("#181008"); paintOffYellow.color = Color.parseColor("#180800"); paintOffRed.color = Color.parseColor("#180010")
             }
+            5 -> { // VFD (Klasszikus Cián)
+                val vfdCyan = Color.parseColor("#00E5FF")
+                val vfdDim = Color.parseColor("#002228")
+                paintGreen.color = vfdCyan; paintYellow.color = vfdCyan; paintRed.color = vfdCyan
+                paintOffGreen.color = vfdDim; paintOffYellow.color = vfdDim; paintOffRed.color = vfdDim
+            }
             else -> { // Classic
                 paintGreen.color = Color.parseColor("#00FF66"); paintYellow.color = Color.parseColor("#FFAA00"); paintRed.color = Color.parseColor("#FF2222")
                 paintOffGreen.color = Color.parseColor("#082010"); paintOffYellow.color = Color.parseColor("#1A1200"); paintOffRed.color = Color.parseColor("#1A0808")
@@ -214,28 +232,71 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val baseW = xScale + 32f
-        val baseH = topY + ledCount * (ledH + ledGap) - ledGap + 10f
-        setMeasuredDimension((baseW * sizeScale).toInt(), (baseH * sizeScale).toInt())
+        if (isHorizontal) {
+            val baseW = 40f + ledCount * (ledH + ledGap) + 20f
+            val baseH = 20f + colW + 16f + 20f + colW + 20f
+            setMeasuredDimension((baseW * sizeScale).toInt(), (baseH * sizeScale).toInt())
+        } else {
+            val baseW = xScale + 32f
+            val baseH = topY + ledCount * (ledH + ledGap) - ledGap + 10f
+            setMeasuredDimension((baseW * sizeScale).toInt(), (baseH * sizeScale).toInt())
+        }
     }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
         canvas.save()
         canvas.scale(sizeScale, sizeScale)
+        
+        if (isHorizontal) {
+            drawHorizontal(canvas)
+        } else {
+            drawVertical(canvas)
+        }
+        
+        canvas.restore()
+    }
+    
+    private fun drawVertical(canvas: Canvas) {
         val totalW = xScale + 32f
         val totalH = topY + ledCount * (ledH + ledGap) - ledGap + 10f
         val bezelRect = RectF(0f, 0f, totalW, totalH)
         canvas.drawRoundRect(bezelRect, 8f, 8f, paintBezel)
         canvas.drawRoundRect(bezelRect, 8f, 8f, paintBezelBorder)
+
         val grooveX = xL + colW + 2f
         canvas.drawRoundRect(RectF(grooveX, topY - 4f, grooveX + 10f, totalH - 6f), 3f, 3f, paintGroove)
+
         canvas.drawText("L", xL + colW / 2f, topY - 8f, paintChanLabel)
         canvas.drawText("R", xR + colW / 2f, topY - 8f, paintChanLabel)
+
         drawTower(canvas, xL, levelL, peakL, peakAlphaL)
         drawTower(canvas, xR, levelR, peakR, peakAlphaR)
         drawScale(canvas, xScale, topY)
-        canvas.restore()
+    }
+
+    private fun drawHorizontal(canvas: Canvas) {
+        val startX = 40f
+        val yL = 20f
+        val yScale = yL + colW + 12f
+        val yR = yScale + 16f
+        
+        val totalW = startX + ledCount * (ledH + ledGap) + 20f
+        val totalH = yR + colW + 16f
+        
+        val bezelRect = RectF(0f, 0f, totalW, totalH)
+        canvas.drawRoundRect(bezelRect, 8f, 8f, paintBezel)
+        canvas.drawRoundRect(bezelRect, 8f, 8f, paintBezelBorder)
+
+        val grooveY = yL + colW + 2f
+        canvas.drawRoundRect(RectF(startX - 4f, grooveY, totalW - 6f, grooveY + 8f), 3f, 3f, paintGroove)
+
+        canvas.drawText("L", 16f, yL + colW / 2f + paintChanLabel.textSize / 3f, paintChanLabel)
+        canvas.drawText("R", 16f, yR + colW / 2f + paintChanLabel.textSize / 3f, paintChanLabel)
+
+        drawTowerHorizontal(canvas, startX, yL, levelL, peakL, peakAlphaL)
+        drawTowerHorizontal(canvas, startX, yR, levelR, peakR, peakAlphaR)
+        drawScaleHorizontal(canvas, startX, yScale)
     }
 
     private fun drawScale(c: Canvas, x: Float, startY: Float) {
@@ -245,13 +306,32 @@ class StereoVuView(context: Context) : FrameLayout(context) {
             Mark((ledCount * 0.85).toInt(), "-6"), 
             Mark((ledCount * 0.65).toInt(), "-10"), 
             Mark((ledCount * 0.35).toInt(), "-20"), 
-            Mark(1, "-\u221E")
+            Mark(1, "-∞")
         )
         for (m in marks) {
             val idxFromTop = ledCount - 1 - m.ledIdxFromBottom
             val centerY = startY + idxFromTop * (ledH + ledGap) + ledH / 2f
             c.drawLine(x, centerY, x + 5f, centerY, paintScaleTick)
             c.drawText(m.label, x + 7f, centerY + paintScaleText.textSize / 3f, paintScaleText)
+        }
+    }
+    
+    private fun drawScaleHorizontal(c: Canvas, startX: Float, y: Float) {
+        data class Mark(val ledIdx: Int, val label: String)
+        val marks = listOf(
+            Mark(1, "-∞"),
+            Mark((ledCount * 0.35).toInt(), "-20"),
+            Mark((ledCount * 0.65).toInt(), "-10"),
+            Mark((ledCount * 0.85).toInt(), "-6"),
+            Mark(ledCount - 1, " 0")
+        )
+        
+        for (m in marks) {
+            val centerX = startX + m.ledIdx * (ledH + ledGap) + ledH / 2f
+            c.drawLine(centerX, y, centerX, y + 5f, paintScaleTick)
+            
+            val textWidth = paintScaleText.measureText(m.label)
+            c.drawText(m.label, centerX - textWidth / 2f, y + 18f, paintScaleText)
         }
     }
 
@@ -300,6 +380,49 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                 val pPaint = getPeakPaint(isRed, isYellow)
                 pPaint.alpha = peakAlpha.toInt().coerceIn(0, 255)
                 val outer = RectF(x - 2f, top - 2f, x + colW + 2f, top + ledH + 2f)
+                c.drawRoundRect(outer, r + 1f, r + 1f, pPaint)
+            }
+        }
+    }
+    
+    private fun drawTowerHorizontal(c: Canvas, startX: Float, y: Float, level: Float, peak: Float, peakAlpha: Float) {
+        val activeLeds = (level * ledCount).toInt()
+        val peakLed = (peak * ledCount).toInt().coerceIn(0, ledCount - 1)
+        
+        val redThreshold = (ledCount * 0.85).toInt()
+        val yellowThreshold = (ledCount * 0.65).toInt()
+        
+        val r = 3f
+        for (i in 0 until ledCount) {
+            val left = startX + i * (ledH + ledGap)
+            val rect = RectF(left, y, left + ledH, y + colW)
+            val isOn = i < activeLeds
+            
+            val isRed = i >= redThreshold
+            val isYellow = i in yellowThreshold until redThreshold
+            
+            val paint = when {
+                isRed -> if (isOn) paintRed else paintOffRed
+                isYellow -> if (isOn) paintYellow else paintOffYellow
+                else -> if (isOn) paintGreen else paintOffGreen
+            }
+            
+            c.drawRoundRect(rect, r, r, paint)
+            
+            if (isOn) {
+                val glowRadius = if (isRed) 14f else if (isYellow) 10f else 8f
+                paintGlow.set(paint)
+                paintGlow.setShadowLayer(glowRadius, 0f, 0f, paint.color)
+                c.drawRoundRect(rect, r, r, paintGlow)
+                
+                // Sheen
+                c.drawRoundRect(RectF(left + 1f, y + 1.5f, left + ledH * 0.38f, y + colW - 1.5f), r - 1f, r - 1f, paintSheen)
+            }
+            
+            if (i == peakLed && peakAlpha > 0f && peak > 0.05f) {
+                val pPaint = getPeakPaint(isRed, isYellow)
+                pPaint.alpha = peakAlpha.toInt().coerceIn(0, 255)
+                val outer = RectF(left - 2f, y - 2f, left + ledH + 2f, y + colW + 2f)
                 c.drawRoundRect(outer, r + 1f, r + 1f, pPaint)
             }
         }
