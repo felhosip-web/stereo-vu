@@ -32,7 +32,7 @@ class MainActivity : Activity() {
         // Sötét tónusú root konténer (gördíthető)
         val root = ScrollView(this).apply {
             setBackgroundColor(Color.parseColor("#121212"))
-            fillViewport = true
+            isFillViewport = true
         }
 
         val container = LinearLayout(this).apply {
