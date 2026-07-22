@@ -69,11 +69,44 @@ class MainActivity : Activity() {
             setMargins(0, 0, 0, 16)
         }
 
+        // 0. Üzemmód / Ballisztika
+        val modeLabel = TextView(this).apply {
+            text = "Kijelző Üzemmód (Ballisztika)"
+            setTextColor(Color.parseColor("#E0E0E0"))
+            textSize = 15f
+            setPadding(0, 16, 0, 8)
+        }
+        container.addView(modeLabel)
+
+        val modes = arrayOf(
+            "Digitális Peak (Gyors, pontos)",
+            "Analóg VU (Lassú, tehetetlenség)",
+            "PPM (Gyors felfutás, lassú lecsengés)",
+            "Egyéni (Csúszkák alapján)"
+        )
+        val modeSpinner = Spinner(this).apply {
+            val adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, modes).apply {
+                setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            this.adapter = adapter
+            setSelection(prefs.getInt("mode", 0))
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    prefs.edit().putInt("mode", position).apply()
+                }
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
+            }
+            setBackgroundColor(Color.parseColor("#252525"))
+            setPadding(24, 24, 24, 24)
+            layoutParams = layoutParamsMatch
+        }
+        container.addView(modeSpinner)
+
         // 1. Lecsengési tehetetlenség (Decay)
         addSlider(
             container,
             layoutParamsMatch,
-            labelPrefix = "Tehetetlenség / Simítás",
+            labelPrefix = "Egyéni Lecsengés (Decay)",
             minVal = 0.70f,
             maxVal = 0.98f,
             defaultVal = 0.88f,
@@ -86,6 +119,30 @@ class MainActivity : Activity() {
                 else -> "Nagyon sima (${(v*100).toInt()}%)"
             }
         }
+
+        // 1b. Felfutás (Attack)
+        addSlider(
+            container,
+            layoutParamsMatch,
+            labelPrefix = "Egyéni Felfutás (Attack)",
+            minVal = 0.05f,
+            maxVal = 1.00f,
+            defaultVal = 0.35f,
+            prefKey = "attack"
+        ) { v ->
+            "${(v * 100).toInt()}%"
+        }
+
+        // 1c. LED-ek száma
+        addIntSlider(
+            container,
+            layoutParamsMatch,
+            labelPrefix = "LED-ek száma",
+            minVal = 10,
+            maxVal = 40,
+            defaultVal = 20,
+            prefKey = "led_count"
+        )
 
         // 2. Érzékenység (Gain)
         addSlider(
@@ -281,6 +338,40 @@ class MainActivity : Activity() {
                     val v = minVal + (progress.toFloat() / 100f) * (maxVal - minVal)
                     prefs.edit().putFloat(prefKey, v).apply()
                     label.text = "$labelPrefix: ${valueFormatter(v)}"
+                }
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) {}
+            })
+            layoutParams = layoutParamsMatch
+        }
+        container.addView(seekBar)
+    }
+
+    private fun addIntSlider(
+        container: LinearLayout,
+        layoutParamsMatch: LinearLayout.LayoutParams,
+        labelPrefix: String,
+        minVal: Int,
+        maxVal: Int,
+        defaultVal: Int,
+        prefKey: String
+    ) {
+        val currentVal = prefs.getInt(prefKey, defaultVal)
+        val label = TextView(this).apply {
+            text = "$labelPrefix: $currentVal"
+            setTextColor(Color.parseColor("#E0E0E0"))
+            textSize = 15f
+            setPadding(0, 16, 0, 8)
+        }
+        container.addView(label)
+        val seekBar = SeekBar(this).apply {
+            max = maxVal - minVal
+            progress = currentVal - minVal
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                    val v = minVal + progress
+                    prefs.edit().putInt(prefKey, v).apply()
+                    label.text = "$labelPrefix: $v"
                 }
                 override fun onStartTrackingTouch(sb: SeekBar?) {}
                 override fun onStopTrackingTouch(sb: SeekBar?) {}

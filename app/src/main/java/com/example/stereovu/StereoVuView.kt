@@ -12,7 +12,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     private var windowManager: WindowManager? = null
     private var params: WindowManager.LayoutParams? = null
 
-    private val ledCount = 20
+    private var ledCount = 20
     private var levelL = 0f
     private var levelR = 0f
     private var targetL = 0f
@@ -29,7 +29,9 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         this@StereoVuView.post { loadPrefs() }
     }
 
-    private var decay = 0.88f
+    private var attackSpeed = 0.35f
+    private var decaySpeed = 0.12f
+    private var mode = 0
     private var gain = 1.0f
     private var sizeScale = 1.0f
     private var opacity = 204
@@ -79,9 +81,6 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         // 60fps decay + peak fade loop - EZ MOZGATJA A KIJELZÉST
         postDelayed(object : Runnable {
             override fun run() {
-                val attackSpeed = 0.35f
-                val decaySpeed = 1f - decay
-
                 if (targetL > levelL) levelL += (targetL - levelL) * attackSpeed
                 else levelL -= (levelL - targetL) * decaySpeed
 
@@ -145,10 +144,24 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     }
 
     private fun loadPrefs() {
-        decay = prefs.getFloat("decay", 0.88f)
-        gain = prefs.getFloat("gain", 1.0f)
         val oldScale = sizeScale
+        val oldLedCount = ledCount
         sizeScale = prefs.getFloat("size_scale", 1.0f)
+        ledCount = prefs.getInt("led_count", 20)
+        
+        mode = prefs.getInt("mode", 0)
+        when (mode) {
+            0 -> { attackSpeed = 0.80f; decaySpeed = 0.20f } // Digitális
+            1 -> { attackSpeed = 0.10f; decaySpeed = 0.05f } // Analóg
+            2 -> { attackSpeed = 0.40f; decaySpeed = 0.08f } // PPM
+            3 -> { 
+                attackSpeed = prefs.getFloat("attack", 0.35f)
+                val decay = prefs.getFloat("decay", 0.88f)
+                decaySpeed = 1f - decay
+            }
+        }
+
+        gain = prefs.getFloat("gain", 1.0f)
         opacity = prefs.getInt("opacity", 204)
         themeId = prefs.getInt("theme", 0)
         // backward compat: régi boolean -> új int
@@ -156,7 +169,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                    else if (prefs.getBoolean("colored_peak", false)) 1 else 0
         setBackgroundColor(Color.argb(opacity, 0, 0, 0))
         updateThemeColors()
-        if (oldScale != sizeScale) {
+        if (oldScale != sizeScale || oldLedCount != ledCount) {
             requestLayout()
             params?.let { windowManager?.updateViewLayout(this, it) }
         }
@@ -227,7 +240,13 @@ class StereoVuView(context: Context) : FrameLayout(context) {
 
     private fun drawScale(c: Canvas, x: Float, startY: Float) {
         data class Mark(val ledIdxFromBottom: Int, val label: String)
-        val marks = listOf(Mark(19, " 0"), Mark(17, "-6"), Mark(13, "-10"), Mark(7, "-20"), Mark(1, "-\u221E"))
+        val marks = listOf(
+            Mark(ledCount - 1, " 0"), 
+            Mark((ledCount * 0.85).toInt(), "-6"), 
+            Mark((ledCount * 0.65).toInt(), "-10"), 
+            Mark((ledCount * 0.35).toInt(), "-20"), 
+            Mark(1, "-\u221E")
+        )
         for (m in marks) {
             val idxFromTop = ledCount - 1 - m.ledIdxFromBottom
             val centerY = startY + idxFromTop * (ledH + ledGap) + ledH / 2f
@@ -254,14 +273,16 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     private fun drawTower(c: Canvas, x: Float, level: Float, peak: Float, peakAlpha: Float) {
         val activeLeds = (level * ledCount).toInt()
         val peakLed = (peak * ledCount).toInt().coerceIn(0, ledCount - 1)
+        val redThreshold = (ledCount * 0.85).toInt()
+        val yellowThreshold = (ledCount * 0.65).toInt()
         val r = 5f
         for (idxFromBottom in 0 until ledCount) {
             val idxFromTop = ledCount - 1 - idxFromBottom
             val top = topY + idxFromTop * (ledH + ledGap)
             val rect = RectF(x, top, x + colW, top + ledH)
             val isOn = idxFromBottom < activeLeds
-            val isRed = idxFromBottom >= 17
-            val isYellow = idxFromBottom in 13..16
+            val isRed = idxFromBottom >= redThreshold
+            val isYellow = idxFromBottom in yellowThreshold until redThreshold
             val paint = when {
                 isRed -> if (isOn) paintRed else paintOffRed
                 isYellow -> if (isOn) paintYellow else paintOffYellow
