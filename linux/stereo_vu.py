@@ -64,9 +64,9 @@ class SettingsDialog(QDialog):
         layout.addRow("Egyéni Lecsengés (5-100%):", self.decay_slider)
         
         self.gain_slider = QSlider(Qt.Orientation.Horizontal)
-        self.gain_slider.setRange(2, 30)
-        self.gain_slider.setValue(int(self.settings.value("gain", 1.0, type=float) * 10))
-        layout.addRow("Érzékenység (0.2x - 3.0x):", self.gain_slider)
+        self.gain_slider.setRange(1, 300)
+        self.gain_slider.setValue(int(self.settings.value("gain", 1.0, type=float) * 100))
+        layout.addRow("Érzékenység (0.01x - 3.0x):", self.gain_slider)
         
         btn_layout = QHBoxLayout()
         save_btn = QPushButton("Mentés")
@@ -87,7 +87,7 @@ class SettingsDialog(QDialog):
         self.settings.setValue("peak_mode", self.peak_combo.currentIndex())
         self.settings.setValue("attack_speed", self.attack_slider.value() / 100.0)
         self.settings.setValue("decay_speed", self.decay_slider.value() / 100.0)
-        self.settings.setValue("gain", self.gain_slider.value() / 10.0)
+        self.settings.setValue("gain", self.gain_slider.value() / 100.0)
         self.accept()
 
 class VuMeter(QWidget):
@@ -210,6 +210,19 @@ class VuMeter(QWidget):
         self.draw_channel(painter, self.level_l, self.peak_l, int(12 * self.size_scale), "L")
         self.draw_channel(painter, self.level_r, self.peak_r, int(45 * self.size_scale), "R")
 
+        if self.theme_id == 5:
+            painter.setPen(QColor(255, 255, 255, 45))
+            y_l = int(12 * self.size_scale)
+            y_r = int(45 * self.size_scale)
+            led_h = int(18 * self.size_scale)
+            start_x = int(35 * self.size_scale)
+            end_x = self.width() - int(10 * self.size_scale)
+            
+            painter.drawLine(start_x, y_l + int(led_h * 0.25), end_x, y_l + int(led_h * 0.25))
+            painter.drawLine(start_x, y_l + int(led_h * 0.75), end_x, y_l + int(led_h * 0.75))
+            painter.drawLine(start_x, y_r + int(led_h * 0.25), end_x, y_r + int(led_h * 0.25))
+            painter.drawLine(start_x, y_r + int(led_h * 0.75), end_x, y_r + int(led_h * 0.75))
+
     def draw_channel(self, painter, level, peak, y_offset, label):
         painter.setPen(QColor(255, 255, 255))
         font = painter.font()
@@ -222,65 +235,104 @@ class VuMeter(QWidget):
         led_h = 18 * self.size_scale
         gap = 2 * self.size_scale
         start_x = 35 * self.size_scale
-        
-        active_leds = int(level * self.num_leds)
-        peak_led = int(peak * self.num_leds)
-        
-        red_start = int(self.num_leds * 0.8)
-        yellow_start = int(self.num_leds * 0.6)
-        
-        for i in range(self.num_leds):
-            x = start_x + i * (led_w + gap)
-            is_red = i >= red_start
-            is_yellow = i >= yellow_start and not is_red
+
+        if self.theme_id == 5:
+            total_segments = self.num_leds * 4
+            active_segments = int(level * total_segments)
+            peak_segment = int(peak * total_segments)
             
-            if self.theme_id == 1:
-                if is_red: base_color = QColor(255, 50, 200)
-                elif is_yellow: base_color = QColor(100, 150, 255)
-                else: base_color = QColor(0, 200, 255)
-            elif self.theme_id == 2:
-                if is_red: base_color = QColor(255, 0, 50)
-                elif is_yellow: base_color = QColor(255, 100, 0)
-                else: base_color = QColor(255, 180, 0)
-            elif self.theme_id == 3: # Ice
-                if is_red: base_color = QColor(255, 255, 255)
-                elif is_yellow: base_color = QColor(136, 221, 255)
-                else: base_color = QColor(0, 229, 255)
-            elif self.theme_id == 4: # Sunset
-                if is_red: base_color = QColor(233, 30, 99)
-                elif is_yellow: base_color = QColor(255, 107, 53)
-                else: base_color = QColor(255, 193, 7)
-            elif self.theme_id == 5: # VFD
-                base_color = QColor(0, 229, 255)
-            else:
-                if is_red: base_color = QColor(255, 50, 50)
-                elif is_yellow: base_color = QColor(255, 200, 50)
-                else: base_color = QColor(0, 255, 102)
-                
-            if i >= active_leds:
-                painter.setBrush(QColor(base_color.red() // 8, base_color.green() // 8, base_color.blue() // 8))
-            else:
-                painter.setBrush(base_color)
-                
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
+            sub_gap = 1 * self.size_scale
+            sub_w = (led_w - 3 * sub_gap) / 4.0
             
-            if i == peak_led and peak_led > 0:
-                if self.peak_mode == 1:
-                    painter.setBrush(base_color)
-                    painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
-                elif self.peak_mode == 2:
-                    painter.setBrush(Qt.BrushStyle.NoBrush)
-                    painter.setPen(QColor(255, 200, 0))
-                    painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
-                elif self.peak_mode == 3:
-                    painter.setBrush(Qt.BrushStyle.NoBrush)
-                    painter.setPen(QColor(0, 230, 255))
-                    painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
+            base_color = QColor(0, 229, 255)
+            dim_color = QColor(0, 34, 40)
+            
+            for i in range(self.num_leds):
+                x = start_x + i * (led_w + gap)
+                
+                for j in range(4):
+                    global_idx = i * 4 + j
+                    is_on = global_idx < active_segments
+                    
+                    sub_x = x + j * (sub_w + sub_gap)
+                    
+                    if is_on:
+                        painter.setBrush(base_color)
+                    else:
+                        painter.setBrush(dim_color)
+                        
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.drawRect(int(sub_x), int(y_offset), int(sub_w), int(led_h))
+                    
+                    if global_idx == peak_segment and peak_segment > 0:
+                        if self.peak_mode == 1 or self.peak_mode == 0:
+                            painter.setBrush(base_color)
+                            painter.drawRect(int(sub_x), int(y_offset), int(sub_w), int(led_h))
+                        elif self.peak_mode == 2:
+                            painter.setBrush(Qt.BrushStyle.NoBrush)
+                            painter.setPen(QColor(255, 200, 0))
+                            painter.drawRect(int(sub_x), int(y_offset), int(sub_w), int(led_h))
+                        elif self.peak_mode == 3:
+                            painter.setBrush(Qt.BrushStyle.NoBrush)
+                            painter.setPen(QColor(0, 230, 255))
+                            painter.drawRect(int(sub_x), int(y_offset), int(sub_w), int(led_h))
+        else:
+            active_leds = int(level * self.num_leds)
+            peak_led = int(peak * self.num_leds)
+            
+            red_start = int(self.num_leds * 0.8)
+            yellow_start = int(self.num_leds * 0.6)
+            
+            for i in range(self.num_leds):
+                x = start_x + i * (led_w + gap)
+                is_red = i >= red_start
+                is_yellow = i >= yellow_start and not is_red
+                
+                if self.theme_id == 1:
+                    if is_red: base_color = QColor(255, 50, 200)
+                    elif is_yellow: base_color = QColor(100, 150, 255)
+                    else: base_color = QColor(0, 200, 255)
+                elif self.theme_id == 2:
+                    if is_red: base_color = QColor(255, 0, 50)
+                    elif is_yellow: base_color = QColor(255, 100, 0)
+                    else: base_color = QColor(255, 180, 0)
+                elif self.theme_id == 3: # Ice
+                    if is_red: base_color = QColor(255, 255, 255)
+                    elif is_yellow: base_color = QColor(136, 221, 255)
+                    else: base_color = QColor(0, 229, 255)
+                elif self.theme_id == 4: # Sunset
+                    if is_red: base_color = QColor(233, 30, 99)
+                    elif is_yellow: base_color = QColor(255, 107, 53)
+                    else: base_color = QColor(255, 193, 7)
                 else:
-                    painter.setBrush(Qt.BrushStyle.NoBrush)
-                    painter.setPen(QColor(255, 255, 255, 180))
-                    painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
+                    if is_red: base_color = QColor(255, 50, 50)
+                    elif is_yellow: base_color = QColor(255, 200, 50)
+                    else: base_color = QColor(0, 255, 102)
+                    
+                if i >= active_leds:
+                    painter.setBrush(QColor(base_color.red() // 8, base_color.green() // 8, base_color.blue() // 8))
+                else:
+                    painter.setBrush(base_color)
+                    
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
+                
+                if i == peak_led and peak_led > 0:
+                    if self.peak_mode == 1:
+                        painter.setBrush(base_color)
+                        painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
+                    elif self.peak_mode == 2:
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(QColor(255, 200, 0))
+                        painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
+                    elif self.peak_mode == 3:
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(QColor(0, 230, 255))
+                        painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
+                    else:
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(QColor(255, 255, 255, 180))
+                        painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:

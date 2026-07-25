@@ -173,12 +173,12 @@ class MainActivity : Activity() {
             container,
             layoutParamsMatch,
             labelPrefix = "Érzékenység / Erősítés",
-            minVal = 0.2f,
+            minVal = 0.01f,
             maxVal = 3.0f,
             defaultVal = 1.0f,
             prefKey = "gain"
         ) { v ->
-            java.lang.String.format(Locale.US, "%.1fx", v)
+            java.lang.String.format(Locale.US, "%.2fx", v)
         }
 
         // 3. Kijelző mérete (Size)

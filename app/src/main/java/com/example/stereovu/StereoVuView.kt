@@ -273,6 +273,19 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         drawTower(canvas, xL, levelL, peakL, peakAlphaL)
         drawTower(canvas, xR, levelR, peakR, peakAlphaR)
         drawScale(canvas, xScale, topY)
+
+        if (themeId == 5) {
+            val wirePaint = Paint().apply {
+                color = Color.argb(45, 255, 255, 255)
+                strokeWidth = 1f
+            }
+            val wireStart = topY - 4f
+            val wireEnd = totalH - 6f
+            canvas.drawLine(xL + colW * 0.3f, wireStart, xL + colW * 0.3f, wireEnd, wirePaint)
+            canvas.drawLine(xL + colW * 0.7f, wireStart, xL + colW * 0.7f, wireEnd, wirePaint)
+            canvas.drawLine(xR + colW * 0.3f, wireStart, xR + colW * 0.3f, wireEnd, wirePaint)
+            canvas.drawLine(xR + colW * 0.7f, wireStart, xR + colW * 0.7f, wireEnd, wirePaint)
+        }
     }
 
     private fun drawHorizontal(canvas: Canvas) {
@@ -297,6 +310,19 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         drawTowerHorizontal(canvas, startX, yL, levelL, peakL, peakAlphaL)
         drawTowerHorizontal(canvas, startX, yR, levelR, peakR, peakAlphaR)
         drawScaleHorizontal(canvas, startX, yScale)
+
+        if (themeId == 5) {
+            val wirePaint = Paint().apply {
+                color = Color.argb(45, 255, 255, 255)
+                strokeWidth = 1f
+            }
+            val wireStart = startX - 4f
+            val wireEnd = totalW - 10f
+            canvas.drawLine(wireStart, yL + colW * 0.25f, wireEnd, yL + colW * 0.25f, wirePaint)
+            canvas.drawLine(wireStart, yL + colW * 0.75f, wireEnd, yL + colW * 0.75f, wirePaint)
+            canvas.drawLine(wireStart, yR + colW * 0.25f, wireEnd, yR + colW * 0.25f, wirePaint)
+            canvas.drawLine(wireStart, yR + colW * 0.75f, wireEnd, yR + colW * 0.75f, wirePaint)
+        }
     }
 
     private fun drawScale(c: Canvas, x: Float, startY: Float) {
@@ -351,79 +377,152 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     }
 
     private fun drawTower(c: Canvas, x: Float, level: Float, peak: Float, peakAlpha: Float) {
-        val activeLeds = (level * ledCount).toInt()
-        val peakLed = (peak * ledCount).toInt().coerceIn(0, ledCount - 1)
         val redThreshold = (ledCount * 0.85).toInt()
         val yellowThreshold = (ledCount * 0.65).toInt()
         val r = 5f
-        for (idxFromBottom in 0 until ledCount) {
-            val idxFromTop = ledCount - 1 - idxFromBottom
-            val top = topY + idxFromTop * (ledH + ledGap)
-            val rect = RectF(x, top, x + colW, top + ledH)
-            val isOn = idxFromBottom < activeLeds
-            val isRed = idxFromBottom >= redThreshold
-            val isYellow = idxFromBottom in yellowThreshold until redThreshold
-            val paint = when {
-                isRed -> if (isOn) paintRed else paintOffRed
-                isYellow -> if (isOn) paintYellow else paintOffYellow
-                else -> if (isOn) paintGreen else paintOffGreen
+
+        if (themeId == 5) {
+            val totalSegments = ledCount * 4
+            val activeSegments = (level * totalSegments).toInt()
+            val peakSegment = (peak * totalSegments).toInt().coerceIn(0, totalSegments - 1)
+            
+            val subGap = 1f
+            val subH = (ledH - 3 * subGap) / 4f
+
+            for (idxFromBottom in 0 until ledCount) {
+                val idxFromTop = ledCount - 1 - idxFromBottom
+                val top = topY + idxFromTop * (ledH + ledGap)
+                
+                for (j in 0 until 4) {
+                    val globalIdx = idxFromBottom * 4 + j
+                    val isOn = globalIdx < activeSegments
+                    
+                    val subTop = top + ledH - (j + 1) * subH - j * subGap
+                    val rect = RectF(x, subTop, x + colW, subTop + subH)
+                    
+                    val paint = if (isOn) paintGreen else paintOffGreen
+                    c.drawRoundRect(rect, r - 2f, r - 2f, paint)
+                    
+                    if (isOn) {
+                        paintGlow.set(paint)
+                        paintGlow.setShadowLayer(8f, 0f, 0f, paint.color)
+                        c.drawRoundRect(rect, r - 2f, r - 2f, paintGlow)
+                    }
+                    
+                    if (globalIdx == peakSegment && peakAlpha > 0f && peak > 0.05f) {
+                        val pPaint = getPeakPaint(false, false)
+                        pPaint.alpha = peakAlpha.toInt().coerceIn(0, 255)
+                        c.drawRoundRect(rect, r - 1f, r - 1f, pPaint)
+                    }
+                }
             }
-            c.drawRoundRect(rect, r, r, paint)
-            if (isOn) {
-                val glowRadius = if (isRed) 14f else if (isYellow) 10f else 8f
-                paintGlow.set(paint)
-                paintGlow.setShadowLayer(glowRadius, 0f, 0f, paint.color)
-                c.drawRoundRect(rect, r, r, paintGlow)
-                c.drawRoundRect(RectF(x + 2f, top + 1.5f, x + colW - 2f, top + ledH * 0.38f), r - 1f, r - 1f, paintSheen)
-            }
-            if (idxFromBottom == peakLed && peakAlpha > 0f && peak > 0.05f) {
-                val pPaint = getPeakPaint(isRed, isYellow)
-                pPaint.alpha = peakAlpha.toInt().coerceIn(0, 255)
-                val outer = RectF(x - 2f, top - 2f, x + colW + 2f, top + ledH + 2f)
-                c.drawRoundRect(outer, r + 1f, r + 1f, pPaint)
+        } else {
+            val activeLeds = (level * ledCount).toInt()
+            val peakLed = (peak * ledCount).toInt().coerceIn(0, ledCount - 1)
+            for (idxFromBottom in 0 until ledCount) {
+                val idxFromTop = ledCount - 1 - idxFromBottom
+                val top = topY + idxFromTop * (ledH + ledGap)
+                val rect = RectF(x, top, x + colW, top + ledH)
+                val isOn = idxFromBottom < activeLeds
+                val isRed = idxFromBottom >= redThreshold
+                val isYellow = idxFromBottom in yellowThreshold until redThreshold
+                val paint = when {
+                    isRed -> if (isOn) paintRed else paintOffRed
+                    isYellow -> if (isOn) paintYellow else paintOffYellow
+                    else -> if (isOn) paintGreen else paintOffGreen
+                }
+                c.drawRoundRect(rect, r, r, paint)
+                if (isOn) {
+                    val glowRadius = if (isRed) 14f else if (isYellow) 10f else 8f
+                    paintGlow.set(paint)
+                    paintGlow.setShadowLayer(glowRadius, 0f, 0f, paint.color)
+                    c.drawRoundRect(rect, r, r, paintGlow)
+                    c.drawRoundRect(RectF(x + 2f, top + 1.5f, x + colW - 2f, top + ledH * 0.38f), r - 1f, r - 1f, paintSheen)
+                }
+                if (idxFromBottom == peakLed && peakAlpha > 0f && peak > 0.05f) {
+                    val pPaint = getPeakPaint(isRed, isYellow)
+                    pPaint.alpha = peakAlpha.toInt().coerceIn(0, 255)
+                    val outer = RectF(x - 2f, top - 2f, x + colW + 2f, top + ledH + 2f)
+                    c.drawRoundRect(outer, r + 1f, r + 1f, pPaint)
+                }
             }
         }
     }
     
     private fun drawTowerHorizontal(c: Canvas, startX: Float, y: Float, level: Float, peak: Float, peakAlpha: Float) {
-        val activeLeds = (level * ledCount).toInt()
-        val peakLed = (peak * ledCount).toInt().coerceIn(0, ledCount - 1)
-        
         val redThreshold = (ledCount * 0.85).toInt()
         val yellowThreshold = (ledCount * 0.65).toInt()
-        
         val r = 3f
-        for (i in 0 until ledCount) {
-            val left = startX + i * (ledH + ledGap)
-            val rect = RectF(left, y, left + ledH, y + colW)
-            val isOn = i < activeLeds
+
+        if (themeId == 5) {
+            val totalSegments = ledCount * 4
+            val activeSegments = (level * totalSegments).toInt()
+            val peakSegment = (peak * totalSegments).toInt().coerceIn(0, totalSegments - 1)
             
-            val isRed = i >= redThreshold
-            val isYellow = i in yellowThreshold until redThreshold
-            
-            val paint = when {
-                isRed -> if (isOn) paintRed else paintOffRed
-                isYellow -> if (isOn) paintYellow else paintOffYellow
-                else -> if (isOn) paintGreen else paintOffGreen
-            }
-            
-            c.drawRoundRect(rect, r, r, paint)
-            
-            if (isOn) {
-                val glowRadius = if (isRed) 14f else if (isYellow) 10f else 8f
-                paintGlow.set(paint)
-                paintGlow.setShadowLayer(glowRadius, 0f, 0f, paint.color)
-                c.drawRoundRect(rect, r, r, paintGlow)
+            val subGap = 1f
+            val subW = (ledH - 3 * subGap) / 4f
+
+            for (i in 0 until ledCount) {
+                val left = startX + i * (ledH + ledGap)
                 
-                // Sheen
-                c.drawRoundRect(RectF(left + 1f, y + 1.5f, left + ledH * 0.38f, y + colW - 1.5f), r - 1f, r - 1f, paintSheen)
+                for (j in 0 until 4) {
+                    val globalIdx = i * 4 + j
+                    val isOn = globalIdx < activeSegments
+                    
+                    val subLeft = left + j * (subW + subGap)
+                    val rect = RectF(subLeft, y, subLeft + subW, y + colW)
+                    
+                    val paint = if (isOn) paintGreen else paintOffGreen
+                    c.drawRoundRect(rect, r - 1f, r - 1f, paint)
+                    
+                    if (isOn) {
+                        paintGlow.set(paint)
+                        paintGlow.setShadowLayer(8f, 0f, 0f, paint.color)
+                        c.drawRoundRect(rect, r - 1f, r - 1f, paintGlow)
+                    }
+                    
+                    if (globalIdx == peakSegment && peakAlpha > 0f && peak > 0.05f) {
+                        val pPaint = getPeakPaint(false, false)
+                        pPaint.alpha = peakAlpha.toInt().coerceIn(0, 255)
+                        c.drawRoundRect(rect, r, r, pPaint)
+                    }
+                }
             }
-            
-            if (i == peakLed && peakAlpha > 0f && peak > 0.05f) {
-                val pPaint = getPeakPaint(isRed, isYellow)
-                pPaint.alpha = peakAlpha.toInt().coerceIn(0, 255)
-                val outer = RectF(left - 2f, y - 2f, left + ledH + 2f, y + colW + 2f)
-                c.drawRoundRect(outer, r + 1f, r + 1f, pPaint)
+        } else {
+            val activeLeds = (level * ledCount).toInt()
+            val peakLed = (peak * ledCount).toInt().coerceIn(0, ledCount - 1)
+            for (i in 0 until ledCount) {
+                val left = startX + i * (ledH + ledGap)
+                val rect = RectF(left, y, left + ledH, y + colW)
+                val isOn = i < activeLeds
+                
+                val isRed = i >= redThreshold
+                val isYellow = i in yellowThreshold until redThreshold
+                
+                val paint = when {
+                    isRed -> if (isOn) paintRed else paintOffRed
+                    isYellow -> if (isOn) paintYellow else paintOffYellow
+                    else -> if (isOn) paintGreen else paintOffGreen
+                }
+                
+                c.drawRoundRect(rect, r, r, paint)
+                
+                if (isOn) {
+                    val glowRadius = if (isRed) 14f else if (isYellow) 10f else 8f
+                    paintGlow.set(paint)
+                    paintGlow.setShadowLayer(glowRadius, 0f, 0f, paint.color)
+                    c.drawRoundRect(rect, r, r, paintGlow)
+                    
+                    // Sheen
+                    c.drawRoundRect(RectF(left + 1f, y + 1.5f, left + ledH * 0.38f, y + colW - 1.5f), r - 1f, r - 1f, paintSheen)
+                }
+                
+                if (i == peakLed && peakAlpha > 0f && peak > 0.05f) {
+                    val pPaint = getPeakPaint(isRed, isYellow)
+                    pPaint.alpha = peakAlpha.toInt().coerceIn(0, 255)
+                    val outer = RectF(left - 2f, y - 2f, left + ledH + 2f, y + colW + 2f)
+                    c.drawRoundRect(outer, r + 1f, r + 1f, pPaint)
+                }
             }
         }
     }
