@@ -16,6 +16,41 @@ class SettingsDialog(QDialog):
         
         layout = QFormLayout(self)
         
+        self.device_combo = QComboBox()
+        self.input_devices = []
+        try:
+            import sounddevice as sd
+            devices = sd.query_devices()
+            default_device = sd.default.device[0]
+            current_device_name = self.settings.value("input_device", "", type=str)
+
+            for i, dev in enumerate(devices):
+                if dev['max_input_channels'] > 0:
+                    self.input_devices.append(dev)
+                    # Add hostapi if there are multiple same names
+                    name = f"{dev['name']}"
+                    self.device_combo.addItem(name, i)
+
+            # Try to select the saved device, or fallback to default
+            idx = 0
+            if current_device_name:
+                idx = self.device_combo.findText(current_device_name)
+
+            if idx < 0: # If not found, use default
+                for j in range(self.device_combo.count()):
+                    if self.device_combo.itemData(j) == default_device:
+                        idx = j
+                        break
+
+            if idx >= 0:
+                self.device_combo.setCurrentIndex(idx)
+
+        except Exception as e:
+            print(f"Error querying audio devices: {e}")
+            self.device_combo.addItem("Alapértelmezett", -1)
+
+        layout.addRow("Bemeneti eszköz:", self.device_combo)
+
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["Digitális Peak", "Analóg VU", "PPM", "Egyéni"])
         self.mode_combo.setCurrentIndex(self.settings.value("mode", 0, type=int))
@@ -79,6 +114,7 @@ class SettingsDialog(QDialog):
         layout.addRow(btn_layout)
         
     def save_settings(self):
+        self.settings.setValue("input_device", self.device_combo.currentText())
         self.settings.setValue("mode", self.mode_combo.currentIndex())
         self.settings.setValue("led_count", self.led_slider.value())
         self.settings.setValue("theme", self.theme_combo.currentIndex())
@@ -119,13 +155,42 @@ class VuMeter(QWidget):
         self.timer.timeout.connect(self.update_meter)
         self.timer.start(16)
         
+        self.stream = None
+        self.start_audio_stream()
+
+    def start_audio_stream(self):
+        if self.stream is not None:
+            self.stream.stop()
+            self.stream.close()
+            self.stream = None
+
+        device_name = self.settings.value("input_device", "", type=str)
+        device_index = None
+
+        if device_name:
+            try:
+                devices = sd.query_devices()
+                for i, dev in enumerate(devices):
+                    if dev['name'] == device_name and dev['max_input_channels'] > 0:
+                        device_index = i
+                        break
+            except Exception as e:
+                print(f"Error querying devices: {e}")
+
         try:
-            self.stream = sd.InputStream(callback=self.audio_callback, channels=2, samplerate=44100)
+            self.stream = sd.InputStream(device=device_index, callback=self.audio_callback, channels=2, samplerate=44100)
             self.stream.start()
         except Exception as e:
-            print(f"Failed to start audio stream: {e}")
-            self.stream = None
-            
+            print(f"Failed to start audio stream with device {device_name or 'default'}: {e}")
+            # Fallback to default if named device failed
+            if device_index is not None:
+                try:
+                    print("Falling back to default device...")
+                    self.stream = sd.InputStream(callback=self.audio_callback, channels=2, samplerate=44100)
+                    self.stream.start()
+                except Exception as e2:
+                    print(f"Failed to start fallback audio stream: {e2}")
+
     def load_settings(self):
         self.mode = self.settings.value("mode", 0, type=int)
         self.num_leds = self.settings.value("led_count", 20, type=int)
@@ -385,9 +450,13 @@ class VuMeter(QWidget):
         menu.exec(pos)
 
     def open_settings(self):
+        old_device = self.settings.value("input_device", "", type=str)
         dialog = SettingsDialog(self)
         if dialog.exec():
             self.load_settings()
+            new_device = self.settings.value("input_device", "", type=str)
+            if old_device != new_device:
+                self.start_audio_stream()
 
     def closeEvent(self, event):
         if self.stream:
@@ -396,7 +465,17 @@ class VuMeter(QWidget):
         super().closeEvent(event)
 
 if __name__ == '__main__':
+    import signal
     app = QApplication(sys.argv)
+
+    # Kézi megszakítás kezelése (Ctrl+C)
+    signal.signal(signal.SIGINT, lambda sig, frame: app.quit())
+
+    # Timer a jelek feldolgozásához
+    timer = QTimer()
+    timer.timeout.connect(lambda: None)
+    timer.start(500)
+
     meter = VuMeter()
     meter.show()
     sys.exit(app.exec())
