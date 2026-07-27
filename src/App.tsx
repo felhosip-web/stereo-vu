@@ -12,7 +12,11 @@ export default function App() {
   const [levelR, setLevelR] = useState(0);
   const [peakL, setPeakL] = useState(0);
   const [peakR, setPeakR] = useState(0);
+  const [isAnalogMode, setIsAnalogMode] = useState(true);
   
+  const velLRef = useRef<number>(0);
+  const velRRef = useRef<number>(0);
+
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const sourceRef = useRef<MediaElementAudioSourceNode | null>(null);
@@ -25,9 +29,6 @@ export default function App() {
     let animationFrameId: number;
     
     const updatePhysics = () => {
-      setLevelL(prev => prev * decaySpeed);
-      setLevelR(prev => prev * decaySpeed);
-      
       const now = Date.now();
       if (now - peakHoldLRef.current > peakHoldTime) {
         setPeakL(prev => prev * 0.96);
@@ -54,32 +55,66 @@ export default function App() {
         const targetL = toLevel(baseSignalL);
         const targetR = toLevel(baseSignalR);
 
-        setLevelL(prev => Math.max(prev, targetL));
-        setLevelR(prev => Math.max(prev, targetR));
-
         setLevelL(prev => {
-          if (prev > peakHoldLRef.current) {
-            // we simulate updating peak in same frame
+          let newLevel;
+          if (isAnalogMode) {
+             const spring = 0.15;
+             const damp = 0.25;
+             velLRef.current += (targetL - prev) * spring;
+             velLRef.current *= (1 - damp);
+             newLevel = prev + velLRef.current;
+          } else {
+             if (targetL > prev) newLevel = prev + (targetL - prev) * 0.8;
+             else newLevel = prev - (prev - targetL) * (1 - decaySpeed);
           }
-          return prev;
+          newLevel = Math.max(0, Math.min(1.2, newLevel)); // Allow slight overshoot internally
+          return newLevel;
+        });
+
+        setLevelR(prev => {
+          let newLevel;
+          if (isAnalogMode) {
+             const spring = 0.15;
+             const damp = 0.25;
+             velRRef.current += (targetR - prev) * spring;
+             velRRef.current *= (1 - damp);
+             newLevel = prev + velRRef.current;
+          } else {
+             if (targetR > prev) newLevel = prev + (targetR - prev) * 0.8;
+             else newLevel = prev - (prev - targetR) * (1 - decaySpeed);
+          }
+          newLevel = Math.max(0, Math.min(1.2, newLevel)); // Allow slight overshoot internally
+          return newLevel;
         });
 
         // Update peaks
-        setPeakL(prev => {
-          if (targetL > prev) {
-            peakHoldLRef.current = Date.now();
-            return targetL;
-          }
-          return prev;
+        setLevelL(prevL => {
+          const displayL = Math.min(1, prevL);
+          setPeakL(prev => {
+            if (displayL > prev) {
+              peakHoldLRef.current = Date.now();
+              return displayL;
+            }
+            return prev;
+          });
+          return prevL;
         });
 
-        setPeakR(prev => {
-          if (targetR > prev) {
-            peakHoldRRef.current = Date.now();
-            return targetR;
-          }
-          return prev;
+        setLevelR(prevR => {
+          const displayR = Math.min(1, prevR);
+          setPeakR(prev => {
+            if (displayR > prev) {
+              peakHoldRRef.current = Date.now();
+              return displayR;
+            }
+            return prev;
+          });
+          return prevR;
         });
+
+      } else {
+        setLevelL(prev => Math.max(0, prev * decaySpeed));
+        setLevelR(prev => Math.max(0, prev * decaySpeed));
       }
 
       animationFrameId = requestAnimationFrame(updatePhysics);
@@ -87,56 +122,54 @@ export default function App() {
 
     animationFrameId = requestAnimationFrame(updatePhysics);
     return () => cancelAnimationFrame(animationFrameId);
-  }, [isPlaying, decaySpeed, peakHoldTime, gain]);
+  }, [isPlaying, decaySpeed, peakHoldTime, gain, isAnalogMode]);
 
   const ledCount = 20;
 
   const renderTower = (level: number, peak: number) => {
-    const activeLeds = Math.round(level * ledCount);
-    const peakLed = Math.min(Math.max(Math.round(peak * ledCount) - 1, 0), ledCount - 1);
+    const displayLevel = Math.min(1, Math.max(0, level));
+    const activeSegments = Math.round(displayLevel * ledCount * 4);
+    const peakSegment = Math.min(Math.max(Math.round(peak * ledCount * 4) - 1, 0), ledCount * 4 - 1);
     
     return (
-      <div className="flex flex-col gap-1 w-12 bg-slate-900/60 p-2 rounded-lg border border-slate-800/40">
+      <div className="flex flex-col gap-1 w-16 bg-slate-900/80 p-2 rounded-lg border border-slate-700/60 shadow-xl">
         {Array.from({ length: ledCount }).map((_, i) => {
           const idxFromBottom = ledCount - 1 - i;
-          const isOn = idxFromBottom < activeLeds;
-          const isRed = idxFromBottom >= 17;
-          const isYellow = idxFromBottom >= 13 && idxFromBottom < 17;
-          const isPeak = idxFromBottom === peakLed;
-
-          let ledColorClass = "bg-slate-850 border border-slate-900";
-          let shadowStyle = {};
-
-          if (isOn) {
-            if (isRed) {
-              ledColorClass = "bg-red-500 border-red-400";
-              shadowStyle = { boxShadow: "0 0 8px rgba(239, 68, 68, 0.6)" };
-            } else if (isYellow) {
-              ledColorClass = "bg-amber-400 border-amber-300";
-              shadowStyle = { boxShadow: "0 0 8px rgba(251, 191, 36, 0.6)" };
-            } else {
-              ledColorClass = "bg-emerald-400 border-emerald-300";
-              shadowStyle = { boxShadow: "0 0 8px rgba(52, 211, 153, 0.6)" };
-            }
-          }
 
           return (
-            <div
-              key={i}
-              className="relative w-full h-3 rounded-[2px] transition-all duration-75"
-            >
-              {/* Normal LED segment */}
-              <div 
-                className={`w-full h-full rounded-[2px] ${ledColorClass}`}
-                style={shadowStyle}
-              />
-              {/* Peak indicator dot */}
-              {isPeak && (
-                <div 
-                  className="absolute inset-x-[-2px] top-[-1px] bottom-[-1px] rounded-[3px] bg-white border border-slate-100 z-10"
-                  style={{ boxShadow: "0 0 10px rgba(255, 255, 255, 0.9)" }}
-                />
-              )}
+            <div key={i} className="flex gap-[2px] w-full h-3 relative">
+              {Array.from({ length: 4 }).map((_, j) => {
+                const globalIdx = idxFromBottom * 4 + j;
+                const isOn = globalIdx < activeSegments;
+                const isPeak = globalIdx === peakSegment;
+
+                let segmentColor = "bg-teal-950/40";
+                let shadowStyle = {};
+                let innerGlare = null;
+
+                if (isOn) {
+                  segmentColor = "bg-cyan-400";
+                  shadowStyle = { boxShadow: "0 0 10px rgba(34, 211, 238, 0.7)" };
+                  innerGlare = <div className="absolute top-[1px] left-[1px] right-[1px] h-[40%] bg-white/40 rounded-[1px]" />;
+                }
+
+                return (
+                  <div key={j} className="relative flex-1 h-full">
+                    <div
+                      className={`w-full h-full rounded-[2px] ${segmentColor} transition-colors duration-75`}
+                      style={shadowStyle}
+                    >
+                      {innerGlare}
+                    </div>
+                    {isPeak && peak > 0.05 && (
+                      <div
+                        className="absolute inset-[-1px] rounded-[2px] border-[1.5px] border-white z-10"
+                        style={{ boxShadow: "0 0 8px rgba(255,255,255,0.8)" }}
+                      />
+                    )}
+                  </div>
+                );
+              })}
             </div>
           );
         })}
@@ -228,7 +261,13 @@ export default function App() {
 
             {/* Controller Adjustments */}
             <div className="space-y-4">
-              <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">Fizikai paraméterek finomhangolása</h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">Fizikai paraméterek finomhangolása</h3>
+                <label className="flex items-center gap-2 text-xs font-bold text-teal-400 cursor-pointer bg-slate-800/50 px-3 py-1.5 rounded-lg border border-teal-500/20">
+                  <input type="checkbox" checked={isAnalogMode} onChange={e => setIsAnalogMode(e.target.checked)} className="accent-teal-500" />
+                  Analóg Rugós Fizika
+                </label>
+              </div>
               
               {/* Decay speed */}
               <div className="space-y-1.5">
