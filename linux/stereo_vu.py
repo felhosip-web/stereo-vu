@@ -107,6 +107,8 @@ class VuMeter(QWidget):
         self.level_r = 0.0
         self.target_l = 0.0
         self.target_r = 0.0
+        self.vel_l = 0.0
+        self.vel_r = 0.0
         self.peak_l = 0.0
         self.peak_r = 0.0
         self.peak_hold_l = 0
@@ -173,25 +175,44 @@ class VuMeter(QWidget):
         self.target_r = min(1.0, to_level(rms_r * 3.0 * self.digital_gain))
 
     def update_meter(self):
-        if self.target_l > self.level_l:
-            self.level_l += (self.target_l - self.level_l) * self.attack_speed
-        else:
-            self.level_l -= (self.level_l - self.target_l) * self.decay_speed
+        if self.mode == 1:
+            # Analog spring physics
+            spring = 0.15
+            damp = 0.25
+            self.vel_l += (self.target_l - self.level_l) * spring
+            self.vel_l *= (1.0 - damp)
+            self.level_l += self.vel_l
             
-        if self.target_r > self.level_r:
-            self.level_r += (self.target_r - self.level_r) * self.attack_speed
-        else:
-            self.level_r -= (self.level_r - self.target_r) * self.decay_speed
+            self.vel_r += (self.target_r - self.level_r) * spring
+            self.vel_r *= (1.0 - damp)
+            self.level_r += self.vel_r
             
-        if self.level_l > self.peak_l:
-            self.peak_l = self.level_l
+            # Allow overshoot internally, but clamp roughly
+            self.level_l = max(0.0, min(1.2, self.level_l))
+            self.level_r = max(0.0, min(1.2, self.level_r))
+        else:
+            if self.target_l > self.level_l:
+                self.level_l += (self.target_l - self.level_l) * self.attack_speed
+            else:
+                self.level_l -= (self.level_l - self.target_l) * self.decay_speed
+
+            if self.target_r > self.level_r:
+                self.level_r += (self.target_r - self.level_r) * self.attack_speed
+            else:
+                self.level_r -= (self.level_r - self.target_r) * self.decay_speed
+
+        display_l = max(0.0, min(1.0, self.level_l))
+        display_r = max(0.0, min(1.0, self.level_r))
+
+        if display_l > self.peak_l:
+            self.peak_l = display_l
             self.peak_hold_l = 60
         else:
             if self.peak_hold_l > 0: self.peak_hold_l -= 1
             else: self.peak_l *= 0.95
             
-        if self.level_r > self.peak_r:
-            self.peak_r = self.level_r
+        if display_r > self.peak_r:
+            self.peak_r = display_r
             self.peak_hold_r = 60
         else:
             if self.peak_hold_r > 0: self.peak_hold_r -= 1
@@ -207,8 +228,10 @@ class VuMeter(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawRoundedRect(self.rect(), int(10 * self.size_scale), int(10 * self.size_scale))
         
-        self.draw_channel(painter, self.level_l, self.peak_l, int(12 * self.size_scale), "L")
-        self.draw_channel(painter, self.level_r, self.peak_r, int(45 * self.size_scale), "R")
+        display_l = max(0.0, min(1.0, self.level_l))
+        display_r = max(0.0, min(1.0, self.level_r))
+        self.draw_channel(painter, display_l, self.peak_l, int(12 * self.size_scale), "L")
+        self.draw_channel(painter, display_r, self.peak_r, int(45 * self.size_scale), "R")
 
         if self.theme_id == 5:
             painter.setPen(QColor(255, 255, 255, 45))
@@ -241,7 +264,7 @@ class VuMeter(QWidget):
             active_segments = int(level * total_segments)
             peak_segment = int(peak * total_segments)
             
-            sub_gap = 1 * self.size_scale
+            sub_gap = 2 * self.size_scale
             sub_w = (led_w - 3 * sub_gap) / 4.0
             
             base_color = QColor(0, 229, 255)
@@ -264,18 +287,24 @@ class VuMeter(QWidget):
                     painter.setPen(Qt.PenStyle.NoPen)
                     painter.drawRect(int(sub_x), int(y_offset), int(sub_w), int(led_h))
                     
+                    if is_on:
+                        # Inner glare
+                        painter.setBrush(QColor(255, 255, 255, 60))
+                        painter.drawRect(int(sub_x + 1), int(y_offset + 1), int(sub_w - 2), int(led_h * 0.4))
+
                     if global_idx == peak_segment and peak_segment > 0:
                         if self.peak_mode == 1 or self.peak_mode == 0:
-                            painter.setBrush(base_color)
-                            painter.drawRect(int(sub_x), int(y_offset), int(sub_w), int(led_h))
+                            painter.setBrush(Qt.BrushStyle.NoBrush)
+                            painter.setPen(QColor(255, 255, 255))
+                            painter.drawRect(int(sub_x - 1), int(y_offset - 1), int(sub_w + 1), int(led_h + 1))
                         elif self.peak_mode == 2:
                             painter.setBrush(Qt.BrushStyle.NoBrush)
                             painter.setPen(QColor(255, 200, 0))
-                            painter.drawRect(int(sub_x), int(y_offset), int(sub_w), int(led_h))
+                            painter.drawRect(int(sub_x - 1), int(y_offset - 1), int(sub_w + 1), int(led_h + 1))
                         elif self.peak_mode == 3:
                             painter.setBrush(Qt.BrushStyle.NoBrush)
                             painter.setPen(QColor(0, 230, 255))
-                            painter.drawRect(int(sub_x), int(y_offset), int(sub_w), int(led_h))
+                            painter.drawRect(int(sub_x - 1), int(y_offset - 1), int(sub_w + 1), int(led_h + 1))
         else:
             active_leds = int(level * self.num_leds)
             peak_led = int(peak * self.num_leds)

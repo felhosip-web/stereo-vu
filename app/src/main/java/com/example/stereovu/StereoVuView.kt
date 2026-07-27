@@ -17,6 +17,8 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     private var levelR = 0f
     private var targetL = 0f
     private var targetR = 0f
+    private var velL = 0f
+    private var velR = 0f
     private var peakL = 0f
     private var peakR = 0f
     private var peakHoldL = 0L
@@ -83,7 +85,18 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         // 60fps decay + peak fade loop - EZ MOZGATJA A KIJELZÉST
         postDelayed(object : Runnable {
             override fun run() {
-                if (useLpf) {
+                if (mode == 1) {
+                    // Analóg rugós (spring) fizika
+                    val spring = 0.15f
+                    val damp = 0.25f
+                    velL += (targetL - levelL) * spring
+                    velL *= (1f - damp)
+                    levelL += velL
+
+                    velR += (targetR - levelR) * spring
+                    velR *= (1f - damp)
+                    levelR += velR
+                } else if (useLpf) {
                     // Szigorú digitális aluláteresztő szűrő (symmetrical 1-pole IIR)
                     levelL += (targetL - levelL) * attackSpeed
                     levelR += (targetR - levelR) * attackSpeed
@@ -96,11 +109,14 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                     else levelR -= (levelR - targetR) * decaySpeed
                 }
 
-                levelL = levelL.coerceIn(0f, 1f)
-                levelR = levelR.coerceIn(0f, 1f)
+                levelL = levelL.coerceIn(0f, 1.2f) // Allow slight overshoot for bouncy effect
+                levelR = levelR.coerceIn(0f, 1.2f)
 
-                if (levelL > peakL) { peakL = levelL; peakHoldL = System.currentTimeMillis(); peakAlphaL = 255f }
-                if (levelR > peakR) { peakR = levelR; peakHoldR = System.currentTimeMillis(); peakAlphaR = 255f }
+                val displayLevelL = levelL.coerceIn(0f, 1f)
+                val displayLevelR = levelR.coerceIn(0f, 1f)
+
+                if (displayLevelL > peakL) { peakL = displayLevelL; peakHoldL = System.currentTimeMillis(); peakAlphaL = 255f }
+                if (displayLevelR > peakR) { peakR = displayLevelR; peakHoldR = System.currentTimeMillis(); peakAlphaR = 255f }
 
                 val now = System.currentTimeMillis()
                 if (now - peakHoldL > 900) {
@@ -270,8 +286,8 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         canvas.drawText("L", xL + colW / 2f, topY - 8f, paintChanLabel)
         canvas.drawText("R", xR + colW / 2f, topY - 8f, paintChanLabel)
 
-        drawTower(canvas, xL, levelL, peakL, peakAlphaL)
-        drawTower(canvas, xR, levelR, peakR, peakAlphaR)
+        drawTower(canvas, xL, levelL.coerceIn(0f, 1f), peakL, peakAlphaL)
+        drawTower(canvas, xR, levelR.coerceIn(0f, 1f), peakR, peakAlphaR)
         drawScale(canvas, xScale, topY)
 
         if (themeId == 5) {
@@ -307,8 +323,8 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         canvas.drawText("L", 16f, yL + colW / 2f + paintChanLabel.textSize / 3f, paintChanLabel)
         canvas.drawText("R", 16f, yR + colW / 2f + paintChanLabel.textSize / 3f, paintChanLabel)
 
-        drawTowerHorizontal(canvas, startX, yL, levelL, peakL, peakAlphaL)
-        drawTowerHorizontal(canvas, startX, yR, levelR, peakR, peakAlphaR)
+        drawTowerHorizontal(canvas, startX, yL, levelL.coerceIn(0f, 1f), peakL, peakAlphaL)
+        drawTowerHorizontal(canvas, startX, yR, levelR.coerceIn(0f, 1f), peakR, peakAlphaR)
         drawScaleHorizontal(canvas, startX, yScale)
 
         if (themeId == 5) {
@@ -386,8 +402,9 @@ class StereoVuView(context: Context) : FrameLayout(context) {
             val activeSegments = (level * totalSegments).toInt()
             val peakSegment = (peak * totalSegments).toInt().coerceIn(0, totalSegments - 1)
             
-            val subGap = 1f
-            val subH = (ledH - 3 * subGap) / 4f
+            // 4 sub-segments HORIZONTALLY per LED for the real VFD matrix look
+            val subGap = 2f
+            val subW = (colW - 3 * subGap) / 4f
 
             for (idxFromBottom in 0 until ledCount) {
                 val idxFromTop = ledCount - 1 - idxFromBottom
@@ -397,16 +414,20 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                     val globalIdx = idxFromBottom * 4 + j
                     val isOn = globalIdx < activeSegments
                     
-                    val subTop = top + ledH - (j + 1) * subH - j * subGap
-                    val rect = RectF(x, subTop, x + colW, subTop + subH)
+                    val subLeft = x + j * (subW + subGap)
+                    val rect = RectF(subLeft, top, subLeft + subW, top + ledH)
                     
                     val paint = if (isOn) paintGreen else paintOffGreen
                     c.drawRoundRect(rect, r - 2f, r - 2f, paint)
                     
                     if (isOn) {
                         paintGlow.set(paint)
-                        paintGlow.setShadowLayer(8f, 0f, 0f, paint.color)
+                        paintGlow.setShadowLayer(10f, 0f, 0f, paint.color)
                         c.drawRoundRect(rect, r - 2f, r - 2f, paintGlow)
+
+                        // Stronger sheer/glare for realism
+                        val glareRect = RectF(subLeft + 1f, top + 1f, subLeft + subW - 1f, top + ledH * 0.4f)
+                        c.drawRoundRect(glareRect, r - 2f, r - 2f, paintSheen)
                     }
                     
                     if (globalIdx == peakSegment && peakAlpha > 0f && peak > 0.05f) {
@@ -459,8 +480,9 @@ class StereoVuView(context: Context) : FrameLayout(context) {
             val activeSegments = (level * totalSegments).toInt()
             val peakSegment = (peak * totalSegments).toInt().coerceIn(0, totalSegments - 1)
             
-            val subGap = 1f
-            val subW = (ledH - 3 * subGap) / 4f
+            // For horizontal mode, sub-segments are stacked VERTICALLY within each horizontal block
+            val subGap = 2f
+            val subH = (colW - 3 * subGap) / 4f
 
             for (i in 0 until ledCount) {
                 val left = startX + i * (ledH + ledGap)
@@ -469,16 +491,21 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                     val globalIdx = i * 4 + j
                     val isOn = globalIdx < activeSegments
                     
-                    val subLeft = left + j * (subW + subGap)
-                    val rect = RectF(subLeft, y, subLeft + subW, y + colW)
+                    // The 4 sub-segments are vertical slices
+                    val subTop = y + (3 - j) * (subH + subGap) // drawing from bottom to top within the block
+                    val rect = RectF(left, subTop, left + ledH, subTop + subH)
                     
                     val paint = if (isOn) paintGreen else paintOffGreen
                     c.drawRoundRect(rect, r - 1f, r - 1f, paint)
                     
                     if (isOn) {
                         paintGlow.set(paint)
-                        paintGlow.setShadowLayer(8f, 0f, 0f, paint.color)
+                        paintGlow.setShadowLayer(10f, 0f, 0f, paint.color)
                         c.drawRoundRect(rect, r - 1f, r - 1f, paintGlow)
+
+                        // Stronger sheer/glare for realism
+                        val glareRect = RectF(left + 1f, subTop + 1f, left + ledH * 0.4f, subTop + subH - 1f)
+                        c.drawRoundRect(glareRect, r - 1f, r - 1f, paintSheen)
                     }
                     
                     if (globalIdx == peakSegment && peakAlpha > 0f && peak > 0.05f) {
