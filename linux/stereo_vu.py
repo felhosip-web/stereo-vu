@@ -21,24 +21,32 @@ class SettingsDialog(QDialog):
         try:
             import sounddevice as sd
             devices = sd.query_devices()
-            default_device = sd.default.device[0]
+            default_device_idx = sd.default.device[0]
+            default_device_name = devices[default_device_idx]['name'] if default_device_idx is not None and default_device_idx >= 0 else None
+
             current_device_name = self.settings.value("input_device", "", type=str)
 
+            hostapis = sd.query_hostapis()
             for i, dev in enumerate(devices):
                 if dev['max_input_channels'] > 0:
                     self.input_devices.append(dev)
-                    # Add hostapi if there are multiple same names
-                    name = f"{dev['name']}"
-                    self.device_combo.addItem(name, i)
+                    hostapi_name = hostapis[dev['hostapi']]['name']
+                    name = f"{dev['name']} [{hostapi_name}]"
+                    # Add item with visible text (name + API) and hidden data (raw name)
+                    self.device_combo.addItem(name, dev['name'])
 
             # Try to select the saved device, or fallback to default
-            idx = 0
+            idx = -1
             if current_device_name:
-                idx = self.device_combo.findText(current_device_name)
-
-            if idx < 0: # If not found, use default
+                # Search by the hidden raw device name
                 for j in range(self.device_combo.count()):
-                    if self.device_combo.itemData(j) == default_device:
+                    if self.device_combo.itemData(j) == current_device_name:
+                        idx = j
+                        break
+
+            if idx < 0 and default_device_name: # If not found, use default
+                for j in range(self.device_combo.count()):
+                    if self.device_combo.itemData(j) == default_device_name:
                         idx = j
                         break
 
@@ -50,6 +58,10 @@ class SettingsDialog(QDialog):
             self.device_combo.addItem("Alapértelmezett", -1)
 
         layout.addRow("Bemeneti eszköz:", self.device_combo)
+
+        hint_label = QLabel("Tipp: A rendszerhangok (kimenet) méréséhez hagyd\nAlapértelmezetten, majd a Hangerőszabályzóban\n(pavucontrol) a Felvétel fülön állítsd át a forrást\n'Monitor of...' eszközre.")
+        hint_label.setStyleSheet("color: gray; font-size: 10px;")
+        layout.addRow("", hint_label)
 
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["Digitális Peak", "Analóg VU", "PPM", "Egyéni"])
@@ -114,7 +126,8 @@ class SettingsDialog(QDialog):
         layout.addRow(btn_layout)
         
     def save_settings(self):
-        self.settings.setValue("input_device", self.device_combo.currentText())
+        # Save the hidden raw device name instead of the formatted text
+        self.settings.setValue("input_device", self.device_combo.currentData())
         self.settings.setValue("mode", self.mode_combo.currentIndex())
         self.settings.setValue("led_count", self.led_slider.value())
         self.settings.setValue("theme", self.theme_combo.currentIndex())
