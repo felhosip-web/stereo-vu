@@ -17,3 +17,5 @@ coverage/
 
 # App build files
 app/build/
+__pycache__/
+*.pyc

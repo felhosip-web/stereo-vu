@@ -263,6 +263,64 @@ class MainActivity : Activity() {
         }
         container.addView(lpfCheckbox)
 
+        // --- Visual Effects (Látvány effektusok) ---
+        val fxHeading = TextView(this).apply {
+            text = "Látvány effektusok (Visual Effects)"
+            setTextColor(Color.WHITE)
+            textSize = 17f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, 24, 0, 8)
+        }
+        container.addView(fxHeading)
+
+        val glowCheckbox = CheckBox(this).apply {
+            text = "LED Ragyogás (Glow effektek)"
+            setTextColor(Color.parseColor("#E0E0E0"))
+            textSize = 15f
+            isChecked = prefs.getBoolean("fx_glow", true)
+            setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean("fx_glow", isChecked).apply()
+            }
+            layoutParams = layoutParamsMatch
+        }
+        container.addView(glowCheckbox)
+
+        val sheenCheckbox = CheckBox(this).apply {
+            text = "Belső Fény / Csillanás (Sheen highlight)"
+            setTextColor(Color.parseColor("#E0E0E0"))
+            textSize = 15f
+            isChecked = prefs.getBoolean("fx_sheen", true)
+            setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean("fx_sheen", isChecked).apply()
+            }
+            layoutParams = layoutParamsMatch
+        }
+        container.addView(sheenCheckbox)
+
+        val ghostCheckbox = CheckBox(this).apply {
+            text = "Halvány inaktív LED-ek (Ghost LEDs)"
+            setTextColor(Color.parseColor("#E0E0E0"))
+            textSize = 15f
+            isChecked = prefs.getBoolean("fx_ghost", true)
+            setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean("fx_ghost", isChecked).apply()
+            }
+            layoutParams = layoutParamsMatch
+        }
+        container.addView(ghostCheckbox)
+
+        val dbScaleCheckbox = CheckBox(this).apply {
+            text = "dB Skála feliratok megjelenítése"
+            setTextColor(Color.parseColor("#E0E0E0"))
+            textSize = 15f
+            isChecked = prefs.getBoolean("fx_db_scale", true)
+            setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean("fx_db_scale", isChecked).apply()
+            }
+            layoutParams = layoutParamsMatch
+        }
+        container.addView(dbScaleCheckbox)
+
         // 2. Érzékenység (Gain)
         addSlider(
             container,
