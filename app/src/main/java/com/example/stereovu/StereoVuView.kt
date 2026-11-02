@@ -122,13 +122,15 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                 if (displayLevelR > peakR) { peakR = displayLevelR; peakHoldR = System.currentTimeMillis(); peakAlphaR = 255f }
 
                 val now = System.currentTimeMillis()
+                // A peak alpha elhalványulási sebességét a peakHoldMs-hez skálázzuk, hogy hosszabb tartás esetén se tűnjön el túl korán
+                val alphaFadeStep = (255f / (peakHoldMs / 16f).coerceAtLeast(10f)).coerceIn(1f, 10f)
                 if (now - peakHoldL > peakHoldMs) {
                     peakL *= peakDecay
-                    peakAlphaL = (peakAlphaL - 3f).coerceAtLeast(0f)
+                    peakAlphaL = (peakAlphaL - alphaFadeStep).coerceAtLeast(0f)
                 }
                 if (now - peakHoldR > peakHoldMs) {
                     peakR *= peakDecay
-                    peakAlphaR = (peakAlphaR - 3f).coerceAtLeast(0f)
+                    peakAlphaR = (peakAlphaR - alphaFadeStep).coerceAtLeast(0f)
                 }
 
                 targetL *= targetDecay

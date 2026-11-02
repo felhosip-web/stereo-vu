@@ -116,9 +116,13 @@ class SettingsDialog(QDialog):
         layout.addRow("Célérték elengedés (0.88-0.97):", self.target_decay_slider)
 
         self.peak_hold_slider = QSlider(Qt.Orientation.Horizontal)
-        self.peak_hold_slider.setRange(10, 180)
-        self.peak_hold_slider.setValue(self.settings.value("peak_hold", 60, type=int))
-        layout.addRow("Peak tartási idő (10-180 képkocka):", self.peak_hold_slider)
+        self.peak_hold_slider.setRange(200, 3000)
+        # Migrate or fallback: ha korábban képkocka (10..180) volt elmentve, skálázzuk fel ms-be
+        saved_peak_hold = self.settings.value("peak_hold_ms", self.settings.value("peak_hold", 900, type=int), type=int)
+        if saved_peak_hold <= 180:
+            saved_peak_hold = int(saved_peak_hold * 16.6)
+        self.peak_hold_slider.setValue(saved_peak_hold)
+        layout.addRow("Peak tartási idő (200-3000 ms):", self.peak_hold_slider)
 
         self.peak_decay_slider = QSlider(Qt.Orientation.Horizontal)
         self.peak_decay_slider.setRange(900, 995)
@@ -172,6 +176,7 @@ class SettingsDialog(QDialog):
         self.settings.setValue("opacity", self.opacity_slider.value())
         self.settings.setValue("peak_mode", self.peak_combo.currentIndex())
         self.settings.setValue("target_decay", self.target_decay_slider.value() / 1000.0)
+        self.settings.setValue("peak_hold_ms", self.peak_hold_slider.value())
         self.settings.setValue("peak_hold", self.peak_hold_slider.value())
         self.settings.setValue("peak_decay", self.peak_decay_slider.value() / 1000.0)
         self.settings.setValue("analog_spring", self.spring_slider.value() / 100.0)
@@ -275,7 +280,12 @@ class VuMeter(QWidget):
             
         self.digital_gain = self.settings.value("gain", 1.0, type=float)
         self.target_decay = self.settings.value("target_decay", 0.94, type=float)
-        self.peak_hold_time = self.settings.value("peak_hold", 60, type=int)
+        # Unify peak hold to milliseconds (peak_hold_ms) and convert to frame count (16ms per frame)
+        saved_peak_hold = self.settings.value("peak_hold_ms", self.settings.value("peak_hold", 900, type=int), type=int)
+        if saved_peak_hold <= 180:
+            saved_peak_hold = int(saved_peak_hold * 16.6)
+        self.peak_hold_ms = saved_peak_hold
+        self.peak_hold_time = max(1, int(round(self.peak_hold_ms / 16.0)))
         self.peak_decay_rate = self.settings.value("peak_decay", 0.985, type=float)
         self.analog_spring = self.settings.value("analog_spring", 0.15, type=float)
         self.analog_damp = self.settings.value("analog_damp", 0.25, type=float)
