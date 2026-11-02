@@ -69,7 +69,38 @@ class MainActivity : Activity() {
             setMargins(0, 0, 0, 16)
         }
 
-        // 0. Üzemmód / Ballisztika
+        // 0. Detektálási mód (Detection mode: Peak / RMS)
+        val detLabel = TextView(this).apply {
+            text = "Detektálási mód (Detection mode)"
+            setTextColor(Color.parseColor("#E0E0E0"))
+            textSize = 15f
+            setPadding(0, 16, 0, 8)
+        }
+        container.addView(detLabel)
+
+        val detModes = arrayOf(
+            "Peak (Élénk, közvetlen csúcsérték)",
+            "RMS (Effektív érték, zenei átlag)"
+        )
+        val detSpinner = Spinner(this).apply {
+            val adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, detModes).apply {
+                setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            this.adapter = adapter
+            setSelection(prefs.getInt("detection_mode", 0))
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    prefs.edit().putInt("detection_mode", position).apply()
+                }
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
+            }
+            setBackgroundColor(Color.parseColor("#252525"))
+            setPadding(24, 24, 24, 24)
+            layoutParams = layoutParamsMatch
+        }
+        container.addView(detSpinner)
+
+        // 0b. Üzemmód / Ballisztika
         val modeLabel = TextView(this).apply {
             text = "Kijelző Üzemmód (Ballisztika)"
             setTextColor(Color.parseColor("#E0E0E0"))
@@ -80,7 +111,7 @@ class MainActivity : Activity() {
 
         val modes = arrayOf(
             "Digitális Peak (Gyors, pontos)",
-            "Analóg VU (Lassú, tehetetlenség)",
+            "Analóg VU (Rugós tehetetlenség)",
             "PPM (Gyors felfutás, lassú lecsengés)",
             "Egyéni (Csúszkák alapján)"
         )
@@ -102,7 +133,71 @@ class MainActivity : Activity() {
         }
         container.addView(modeSpinner)
 
-        // 1. Lecsengési tehetetlenség (Decay)
+        // Target / Release rate (Célérték elengedési sebesség)
+        addSlider(
+            container,
+            layoutParamsMatch,
+            labelPrefix = "Célérték elengedés (Release rate)",
+            minVal = 0.88f,
+            maxVal = 0.97f,
+            defaultVal = 0.94f,
+            prefKey = "target_decay"
+        ) { v ->
+            java.lang.String.format(Locale.US, "%.3f", v)
+        }
+
+        // Peak Hold time (Peak tartási idő)
+        addLongSlider(
+            container,
+            layoutParamsMatch,
+            labelPrefix = "Peak tartási idő (Peak Hold)",
+            minVal = 200L,
+            maxVal = 3000L,
+            defaultVal = 900L,
+            prefKey = "peak_hold_ms",
+            unit = "ms"
+        )
+
+        // Peak decay rate (Peak elhalványulási sebesség)
+        addSlider(
+            container,
+            layoutParamsMatch,
+            labelPrefix = "Peak lecsengés (Peak decay)",
+            minVal = 0.900f,
+            maxVal = 0.995f,
+            defaultVal = 0.985f,
+            prefKey = "peak_decay"
+        ) { v ->
+            java.lang.String.format(Locale.US, "%.3f", v)
+        }
+
+        // Analóg rugó (Analog Spring)
+        addSlider(
+            container,
+            layoutParamsMatch,
+            labelPrefix = "Analóg Rugó (Spring)",
+            minVal = 0.05f,
+            maxVal = 0.40f,
+            defaultVal = 0.15f,
+            prefKey = "analog_spring"
+        ) { v ->
+            java.lang.String.format(Locale.US, "%.2f", v)
+        }
+
+        // Analóg csillapítás (Analog Damp)
+        addSlider(
+            container,
+            layoutParamsMatch,
+            labelPrefix = "Analóg Csillapítás (Damp)",
+            minVal = 0.10f,
+            maxVal = 0.40f,
+            defaultVal = 0.25f,
+            prefKey = "analog_damp"
+        ) { v ->
+            java.lang.String.format(Locale.US, "%.2f", v)
+        }
+
+        // 1. Lecsengési tehetetlenség (Decay) - Egyéni módhoz
         addSlider(
             container,
             layoutParamsMatch,
@@ -120,7 +215,7 @@ class MainActivity : Activity() {
             }
         }
 
-        // 1b. Felfutás (Attack)
+        // 1b. Felfutás (Attack) - Egyéni módhoz
         addSlider(
             container,
             layoutParamsMatch,
@@ -390,6 +485,41 @@ class MainActivity : Activity() {
                     val v = minVal + (progress.toFloat() / 100f) * (maxVal - minVal)
                     prefs.edit().putFloat(prefKey, v).apply()
                     label.text = "$labelPrefix: ${valueFormatter(v)}"
+                }
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) {}
+            })
+            layoutParams = layoutParamsMatch
+        }
+        container.addView(seekBar)
+    }
+
+    private fun addLongSlider(
+        container: LinearLayout,
+        layoutParamsMatch: LinearLayout.LayoutParams,
+        labelPrefix: String,
+        minVal: Long,
+        maxVal: Long,
+        defaultVal: Long,
+        prefKey: String,
+        unit: String
+    ) {
+        val currentVal = prefs.getLong(prefKey, defaultVal)
+        val label = TextView(this).apply {
+            text = "$labelPrefix: $currentVal $unit"
+            setTextColor(Color.parseColor("#E0E0E0"))
+            textSize = 15f
+            setPadding(0, 16, 0, 8)
+        }
+        container.addView(label)
+        val seekBar = SeekBar(this).apply {
+            max = (maxVal - minVal).toInt()
+            progress = (currentVal - minVal).toInt().coerceIn(0, (maxVal - minVal).toInt())
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                    val v = minVal + progress.toLong()
+                    prefs.edit().putLong(prefKey, v).apply()
+                    label.text = "$labelPrefix: $v $unit"
                 }
                 override fun onStartTrackingTouch(sb: SeekBar?) {}
                 override fun onStopTrackingTouch(sb: SeekBar?) {}

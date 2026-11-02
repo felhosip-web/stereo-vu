@@ -31,8 +31,13 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         this@StereoVuView.post { loadPrefs() }
     }
 
-    private var attackSpeed = 0.35f
+    private var attackSpeed = 0.90f
     private var decaySpeed = 0.12f
+    private var targetDecay = 0.94f
+    private var peakHoldMs = 900L
+    private var peakDecay = 0.985f
+    private var analogSpring = 0.15f
+    private var analogDamp = 0.25f
     private var mode = 0
     private var useLpf = false
     private var isHorizontal = false
@@ -86,15 +91,13 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         postDelayed(object : Runnable {
             override fun run() {
                 if (mode == 1) {
-                    // Analóg rugós (spring) fizika
-                    val spring = 0.15f
-                    val damp = 0.25f
-                    velL += (targetL - levelL) * spring
-                    velL *= (1f - damp)
+                    // Analóg rugós (spring) fizika finomhangolható paraméterekkel
+                    velL += (targetL - levelL) * analogSpring
+                    velL *= (1f - analogDamp)
                     levelL += velL
 
-                    velR += (targetR - levelR) * spring
-                    velR *= (1f - damp)
+                    velR += (targetR - levelR) * analogSpring
+                    velR *= (1f - analogDamp)
                     levelR += velR
                 } else if (useLpf) {
                     // Szigorú digitális aluláteresztő szűrő (symmetrical 1-pole IIR)
@@ -119,17 +122,17 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                 if (displayLevelR > peakR) { peakR = displayLevelR; peakHoldR = System.currentTimeMillis(); peakAlphaR = 255f }
 
                 val now = System.currentTimeMillis()
-                if (now - peakHoldL > 900) {
-                    peakL *= 0.985f
+                if (now - peakHoldL > peakHoldMs) {
+                    peakL *= peakDecay
                     peakAlphaL = (peakAlphaL - 3f).coerceAtLeast(0f)
                 }
-                if (now - peakHoldR > 900) {
-                    peakR *= 0.985f
+                if (now - peakHoldR > peakHoldMs) {
+                    peakR *= peakDecay
                     peakAlphaR = (peakAlphaR - 3f).coerceAtLeast(0f)
                 }
 
-                targetL *= 0.88f
-                targetR *= 0.88f
+                targetL *= targetDecay
+                targetR *= targetDecay
 
                 invalidate()
                 postDelayed(this, 16)
@@ -179,7 +182,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         
         mode = prefs.getInt("mode", 0)
         when (mode) {
-            0 -> { attackSpeed = 0.80f; decaySpeed = 0.20f } // Digitális
+            0 -> { attackSpeed = 0.90f; decaySpeed = 0.12f } // Digitális Peak: gyorsabb felfutás, karakteresebb lassabb lecsengés
             1 -> { attackSpeed = 0.10f; decaySpeed = 0.05f } // Analóg
             2 -> { attackSpeed = 0.40f; decaySpeed = 0.08f } // PPM
             3 -> { 
@@ -188,6 +191,12 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                 decaySpeed = 1f - decay
             }
         }
+
+        targetDecay = prefs.getFloat("target_decay", 0.94f)
+        peakHoldMs = prefs.getLong("peak_hold_ms", 900L)
+        peakDecay = prefs.getFloat("peak_decay", 0.985f)
+        analogSpring = prefs.getFloat("analog_spring", 0.15f)
+        analogDamp = prefs.getFloat("analog_damp", 0.25f)
 
         gain = prefs.getFloat("gain", 1.0f)
         opacity = prefs.getInt("opacity", 204)
@@ -238,13 +247,13 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     override fun onDetachedFromWindow() { prefs.unregisterOnSharedPreferenceChangeListener(prefListener); super.onDetachedFromWindow() }
     fun setWindowParams(wm: WindowManager, p: WindowManager.LayoutParams) { windowManager = wm; params = p }
 
-    fun updateLevels(rmsL: Float, rmsR: Float) {
-        fun toLevel(rms: Float): Float {
-            val db = 20f * log10((rms * 3f * gain).coerceAtLeast(0.0001f))
+    fun updateLevels(rawL: Float, rawR: Float) {
+        fun toLevel(signal: Float): Float {
+            val db = 20f * log10((signal * 3f * gain).coerceAtLeast(0.0001f))
             return ((db + 50f) / 50f).coerceIn(0f, 1f)
         }
-        targetL = max(targetL, toLevel(rmsL))
-        targetR = max(targetR, toLevel(rmsR))
+        targetL = max(targetL, toLevel(rawL))
+        targetR = max(targetR, toLevel(rawR))
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
