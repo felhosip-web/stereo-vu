@@ -250,9 +250,9 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                 paintGreen.color = Color.parseColor("#FFC107"); paintYellow.color = Color.parseColor("#FF6B35"); paintRed.color = Color.parseColor("#E91E63")
                 paintOffGreen.color = Color.parseColor("#181008"); paintOffYellow.color = Color.parseColor("#180800"); paintOffRed.color = Color.parseColor("#180010")
             }
-            5 -> { // VFD (Klasszikus Cián)
-                val vfdCyan = Color.parseColor("#00E5FF")
-                val vfdDim = Color.parseColor("#002228")
+            5 -> { // VFD (Klasszikus Videoton Cián - meleg zöldes-cián és sötét teal)
+                val vfdCyan = Color.parseColor("#00D4E8")
+                val vfdDim = Color.parseColor("#001F26")
                 paintGreen.color = vfdCyan; paintYellow.color = vfdCyan; paintRed.color = vfdCyan
                 paintOffGreen.color = vfdDim; paintOffYellow.color = vfdDim; paintOffRed.color = vfdDim
             }
@@ -305,11 +305,20 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         val totalW = xScale + 32f
         val totalH = topY + ledCount * (ledH + ledGap) - ledGap + 10f
         val bezelRect = RectF(0f, 0f, totalW, totalH)
-        canvas.drawRoundRect(bezelRect, 8f, 8f, paintBezel)
-        canvas.drawRoundRect(bezelRect, 8f, 8f, paintBezelBorder)
+        val vfdBezel = if (themeId == 5) Paint().apply { color = Color.parseColor("#0A1215") } else paintBezel
+        val vfdBorder = if (themeId == 5) Paint().apply { color = Color.parseColor("#003840"); style = Paint.Style.STROKE; strokeWidth = 2f } else paintBezelBorder
+        canvas.drawRoundRect(bezelRect, 8f, 8f, vfdBezel)
+        canvas.drawRoundRect(bezelRect, 8f, 8f, vfdBorder)
 
         val grooveX = xL + colW + 2f
-        canvas.drawRoundRect(RectF(grooveX, topY - 4f, grooveX + 10f, totalH - 6f), 3f, 3f, paintGroove)
+        val vfdGroove = if (themeId == 5) Paint().apply { color = Color.parseColor("#040B0D") } else paintGroove
+        canvas.drawRoundRect(RectF(grooveX, topY - 4f, grooveX + 10f, totalH - 6f), 3f, 3f, vfdGroove)
+
+        if (themeId == 5) {
+            paintChanLabel.color = Color.parseColor("#66C0CC")
+        } else {
+            paintChanLabel.color = Color.WHITE
+        }
 
         canvas.drawText("L", xL + colW / 2f, topY - 8f, paintChanLabel)
         canvas.drawText("R", xR + colW / 2f, topY - 8f, paintChanLabel)
@@ -344,11 +353,20 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         val totalH = yR + colW + 16f
         
         val bezelRect = RectF(0f, 0f, totalW, totalH)
-        canvas.drawRoundRect(bezelRect, 8f, 8f, paintBezel)
-        canvas.drawRoundRect(bezelRect, 8f, 8f, paintBezelBorder)
+        val vfdBezel = if (themeId == 5) Paint().apply { color = Color.parseColor("#0A1215") } else paintBezel
+        val vfdBorder = if (themeId == 5) Paint().apply { color = Color.parseColor("#003840"); style = Paint.Style.STROKE; strokeWidth = 2f } else paintBezelBorder
+        canvas.drawRoundRect(bezelRect, 8f, 8f, vfdBezel)
+        canvas.drawRoundRect(bezelRect, 8f, 8f, vfdBorder)
 
         val grooveY = yL + colW + 2f
-        canvas.drawRoundRect(RectF(startX - 4f, grooveY, totalW - 6f, grooveY + 8f), 3f, 3f, paintGroove)
+        val vfdGroove = if (themeId == 5) Paint().apply { color = Color.parseColor("#040B0D") } else paintGroove
+        canvas.drawRoundRect(RectF(startX - 4f, grooveY, totalW - 6f, grooveY + 8f), 3f, 3f, vfdGroove)
+
+        if (themeId == 5) {
+            paintChanLabel.color = Color.parseColor("#66C0CC")
+        } else {
+            paintChanLabel.color = Color.WHITE
+        }
 
         canvas.drawText("L", 16f, yL + colW / 2f + paintChanLabel.textSize / 3f, paintChanLabel)
         canvas.drawText("R", 16f, yR + colW / 2f + paintChanLabel.textSize / 3f, paintChanLabel)
@@ -383,6 +401,15 @@ class StereoVuView(context: Context) : FrameLayout(context) {
             Mark((ledCount * 0.35).toInt(), "-20"),
             Mark(1, "-∞")
         )
+
+        if (themeId == 5) {
+            paintScaleTick.color = Color.parseColor("#006A75")
+            paintScaleText.color = Color.parseColor("#4DAEB8")
+        } else {
+            paintScaleTick.color = Color.parseColor("#666666")
+            paintScaleText.color = Color.parseColor("#888888")
+        }
+
         for (m in marks) {
             val idxFromTop = ledCount - 1 - m.ledIdxFromBottom
             val centerY = startY + idxFromTop * (ledH + ledGap) + ledH / 2f
@@ -401,6 +428,14 @@ class StereoVuView(context: Context) : FrameLayout(context) {
             Mark((ledCount * 0.91).toInt(), "-3"),
             Mark(ledCount - 1, " 0")
         )
+
+        if (themeId == 5) {
+            paintScaleTick.color = Color.parseColor("#006A75")
+            paintScaleText.color = Color.parseColor("#4DAEB8")
+        } else {
+            paintScaleTick.color = Color.parseColor("#666666")
+            paintScaleText.color = Color.parseColor("#888888")
+        }
         
         for (m in marks) {
             val centerX = startX + m.ledIdx * (ledH + ledGap) + ledH / 2f
@@ -456,13 +491,13 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                     
                     if (isOn) {
                         if (fxGlow) {
-                            val glowRadius = 8f + level * 8f
+                            val glowRadius = 10f + level * 10f
                             paintGlow.set(paint)
-                            paintGlow.setShadowLayer(glowRadius, 0f, 0f, paint.color)
+                            paintGlow.setShadowLayer(glowRadius, 0f, 0f, Color.parseColor("#00D4E8"))
                             c.drawRoundRect(rect, r - 2f, r - 2f, paintGlow)
                         }
                         if (fxSheen) {
-                            val glareRect = RectF(subLeft + 1f, top + 1f, subLeft + subW - 1f, top + ledH * 0.4f)
+                            val glareRect = RectF(subLeft + 1f, top + 1f, subLeft + subW - 1f, top + ledH * 0.35f)
                             c.drawRoundRect(glareRect, r - 2f, r - 2f, paintSheen)
                         }
                     }
@@ -542,13 +577,13 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                     
                     if (isOn) {
                         if (fxGlow) {
-                            val glowRadius = 8f + level * 8f
+                            val glowRadius = 10f + level * 10f
                             paintGlow.set(paint)
-                            paintGlow.setShadowLayer(glowRadius, 0f, 0f, paint.color)
+                            paintGlow.setShadowLayer(glowRadius, 0f, 0f, Color.parseColor("#00D4E8"))
                             c.drawRoundRect(rect, r - 1f, r - 1f, paintGlow)
                         }
                         if (fxSheen) {
-                            val glareRect = RectF(left + 1f, subTop + 1f, left + ledH * 0.4f, subTop + subH - 1f)
+                            val glareRect = RectF(left + 1f, subTop + 1f, left + ledH * 0.35f, subTop + subH - 1f)
                             c.drawRoundRect(glareRect, r - 1f, r - 1f, paintSheen)
                         }
                     }

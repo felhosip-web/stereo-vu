@@ -403,9 +403,15 @@ class VuMeter(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        painter.setBrush(QColor(0, 0, 0, self.bg_opacity))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(self.rect(), int(10 * self.size_scale), int(10 * self.size_scale))
+        if self.theme_id == 5:
+            # Sötét fekete-teal panel Videoton stílusban
+            painter.setBrush(QColor(10, 18, 21, self.bg_opacity))
+            painter.setPen(QColor(0, 56, 64, 180))
+            painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), int(10 * self.size_scale), int(10 * self.size_scale))
+        else:
+            painter.setBrush(QColor(0, 0, 0, self.bg_opacity))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(self.rect(), int(10 * self.size_scale), int(10 * self.size_scale))
         
         display_l = max(0.0, min(1.0, self.level_l))
         display_r = max(0.0, min(1.0, self.level_r))
@@ -450,7 +456,10 @@ class VuMeter(QWidget):
                     painter.drawLine(x_col + int(col_w * 0.75), top_y, x_col + int(col_w * 0.75), end_y)
 
     def draw_scale_horizontal(self, painter, start_x, y):
-        painter.setPen(QColor(160, 160, 160, 180))
+        if self.theme_id == 5:
+            painter.setPen(QColor(77, 174, 184, 200))
+        else:
+            painter.setPen(QColor(160, 160, 160, 180))
         font = painter.font()
         font.setBold(False)
         font.setPointSizeF(max(6.0, 7.5 * self.size_scale))
@@ -473,7 +482,10 @@ class VuMeter(QWidget):
             painter.drawText(x - int(8 * self.size_scale), y + int(10 * self.size_scale), label)
 
     def draw_scale_vertical(self, painter, x, start_y):
-        painter.setPen(QColor(160, 160, 160, 180))
+        if self.theme_id == 5:
+            painter.setPen(QColor(77, 174, 184, 200))
+        else:
+            painter.setPen(QColor(160, 160, 160, 180))
         font = painter.font()
         font.setBold(False)
         font.setPointSizeF(max(6.0, 7.5 * self.size_scale))
@@ -497,7 +509,10 @@ class VuMeter(QWidget):
             painter.drawText(x + int(6 * self.size_scale), y + int(4 * self.size_scale), label)
 
     def draw_channel_horizontal(self, painter, level, peak, y_offset, label):
-        painter.setPen(QColor(255, 255, 255))
+        if self.theme_id == 5:
+            painter.setPen(QColor(102, 192, 204))
+        else:
+            painter.setPen(QColor(255, 255, 255))
         font = painter.font()
         font.setBold(True)
         font.setPointSizeF(font.pointSizeF() * self.size_scale)
@@ -634,7 +649,10 @@ class VuMeter(QWidget):
                         painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
 
     def draw_channel_vertical(self, painter, level, peak, x_offset, col_w, label):
-        painter.setPen(QColor(255, 255, 255))
+        if self.theme_id == 5:
+            painter.setPen(QColor(102, 192, 204))
+        else:
+            painter.setPen(QColor(255, 255, 255))
         font = painter.font()
         font.setBold(True)
         font.setPointSizeF(font.pointSizeF() * self.size_scale)
@@ -653,8 +671,8 @@ class VuMeter(QWidget):
 
             sub_gap = 2 * self.size_scale
             sub_w = (led_w - 3 * sub_gap) / 4.0
-            base_color = QColor(0, 229, 255)
-            dim_color = QColor(0, 34, 40)
+            base_color = QColor(0, 212, 232)
+            dim_color = QColor(0, 31, 38)
 
             for idx_from_bottom in range(self.num_leds):
                 idx_from_top = self.num_leds - 1 - idx_from_bottom
