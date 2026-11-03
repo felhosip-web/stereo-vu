@@ -461,6 +461,7 @@ class VuMeter(QWidget):
             (int(self.num_leds * 0.35), "-20"),
             (int(self.num_leds * 0.65), "-10"),
             (int(self.num_leds * 0.85), "-6"),
+            (int(self.num_leds * 0.91), "-3"),
             (self.num_leds - 1, "0")
         ]
         led_w = 11 * self.size_scale
@@ -480,6 +481,7 @@ class VuMeter(QWidget):
 
         marks = [
             (self.num_leds - 1, " 0"),
+            (int(self.num_leds * 0.91), "-3"),
             (int(self.num_leds * 0.85), "-6"),
             (int(self.num_leds * 0.65), "-10"),
             (int(self.num_leds * 0.35), "-20"),

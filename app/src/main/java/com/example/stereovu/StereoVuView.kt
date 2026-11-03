@@ -192,6 +192,12 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         fxSheen = prefs.getBoolean("fx_sheen", true)
         fxGhost = prefs.getBoolean("fx_ghost", true)
         fxDbScale = prefs.getBoolean("fx_db_scale", true)
+
+        if (fxGlow) {
+            setLayerType(LAYER_TYPE_SOFTWARE, null)
+        } else {
+            setLayerType(LAYER_TYPE_HARDWARE, null)
+        }
         
         mode = prefs.getInt("mode", 0)
         when (mode) {
@@ -370,10 +376,11 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     private fun drawScale(c: Canvas, x: Float, startY: Float) {
         data class Mark(val ledIdxFromBottom: Int, val label: String)
         val marks = listOf(
-            Mark(ledCount - 1, " 0"), 
-            Mark((ledCount * 0.85).toInt(), "-6"), 
-            Mark((ledCount * 0.65).toInt(), "-10"), 
-            Mark((ledCount * 0.35).toInt(), "-20"), 
+            Mark(ledCount - 1, " 0"),
+            Mark((ledCount * 0.91).toInt(), "-3"),
+            Mark((ledCount * 0.85).toInt(), "-6"),
+            Mark((ledCount * 0.65).toInt(), "-10"),
+            Mark((ledCount * 0.35).toInt(), "-20"),
             Mark(1, "-∞")
         )
         for (m in marks) {
@@ -391,6 +398,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
             Mark((ledCount * 0.35).toInt(), "-20"),
             Mark((ledCount * 0.65).toInt(), "-10"),
             Mark((ledCount * 0.85).toInt(), "-6"),
+            Mark((ledCount * 0.91).toInt(), "-3"),
             Mark(ledCount - 1, " 0")
         )
         
