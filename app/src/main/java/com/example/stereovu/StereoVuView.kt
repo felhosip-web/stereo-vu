@@ -31,8 +31,13 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         this@StereoVuView.post { loadPrefs() }
     }
 
-    private var attackSpeed = 0.35f
+    private var attackSpeed = 0.90f
     private var decaySpeed = 0.12f
+    private var targetDecay = 0.94f
+    private var peakHoldMs = 900L
+    private var peakDecay = 0.985f
+    private var analogSpring = 0.15f
+    private var analogDamp = 0.25f
     private var mode = 0
     private var useLpf = false
     private var isHorizontal = false
@@ -41,6 +46,12 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     private var opacity = 204
     private var themeId = 0
     private var peakMode = 0 // 0=white, 1=colored same as led, 2=amber fixed, 3=cyan fixed
+
+    // Visual Effects
+    private var fxGlow = true
+    private var fxSheen = true
+    private var fxGhost = true
+    private var fxDbScale = true
 
     // LEDs
     private val paintGreen = Paint().apply { color = Color.parseColor("#00FF66") }
@@ -86,15 +97,13 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         postDelayed(object : Runnable {
             override fun run() {
                 if (mode == 1) {
-                    // Analóg rugós (spring) fizika
-                    val spring = 0.15f
-                    val damp = 0.25f
-                    velL += (targetL - levelL) * spring
-                    velL *= (1f - damp)
+                    // Analóg rugós (spring) fizika finomhangolható paraméterekkel
+                    velL += (targetL - levelL) * analogSpring
+                    velL *= (1f - analogDamp)
                     levelL += velL
 
-                    velR += (targetR - levelR) * spring
-                    velR *= (1f - damp)
+                    velR += (targetR - levelR) * analogSpring
+                    velR *= (1f - analogDamp)
                     levelR += velR
                 } else if (useLpf) {
                     // Szigorú digitális aluláteresztő szűrő (symmetrical 1-pole IIR)
@@ -119,17 +128,19 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                 if (displayLevelR > peakR) { peakR = displayLevelR; peakHoldR = System.currentTimeMillis(); peakAlphaR = 255f }
 
                 val now = System.currentTimeMillis()
-                if (now - peakHoldL > 900) {
-                    peakL *= 0.985f
-                    peakAlphaL = (peakAlphaL - 3f).coerceAtLeast(0f)
+                // A peak alpha elhalványulási sebességét a peakHoldMs-hez skálázzuk, hogy hosszabb tartás esetén se tűnjön el túl korán
+                val alphaFadeStep = (255f / (peakHoldMs / 16f).coerceAtLeast(10f)).coerceIn(1f, 10f)
+                if (now - peakHoldL > peakHoldMs) {
+                    peakL *= peakDecay
+                    peakAlphaL = (peakAlphaL - alphaFadeStep).coerceAtLeast(0f)
                 }
-                if (now - peakHoldR > 900) {
-                    peakR *= 0.985f
-                    peakAlphaR = (peakAlphaR - 3f).coerceAtLeast(0f)
+                if (now - peakHoldR > peakHoldMs) {
+                    peakR *= peakDecay
+                    peakAlphaR = (peakAlphaR - alphaFadeStep).coerceAtLeast(0f)
                 }
 
-                targetL *= 0.88f
-                targetR *= 0.88f
+                targetL *= targetDecay
+                targetR *= targetDecay
 
                 invalidate()
                 postDelayed(this, 16)
@@ -172,14 +183,25 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         val oldScale = sizeScale
         val oldLedCount = ledCount
         val oldHoriz = isHorizontal
+        val oldDbScale = fxDbScale
         sizeScale = prefs.getFloat("size_scale", 1.0f)
         ledCount = prefs.getInt("led_count", 20)
         isHorizontal = prefs.getBoolean("horizontal", false)
         useLpf = prefs.getBoolean("use_lpf", false)
+        fxGlow = prefs.getBoolean("fx_glow", true)
+        fxSheen = prefs.getBoolean("fx_sheen", true)
+        fxGhost = prefs.getBoolean("fx_ghost", true)
+        fxDbScale = prefs.getBoolean("fx_db_scale", true)
+
+        if (fxGlow) {
+            setLayerType(LAYER_TYPE_SOFTWARE, null)
+        } else {
+            setLayerType(LAYER_TYPE_HARDWARE, null)
+        }
         
         mode = prefs.getInt("mode", 0)
         when (mode) {
-            0 -> { attackSpeed = 0.80f; decaySpeed = 0.20f } // Digitális
+            0 -> { attackSpeed = 0.90f; decaySpeed = 0.12f } // Digitális Peak: gyorsabb felfutás, karakteresebb lassabb lecsengés
             1 -> { attackSpeed = 0.10f; decaySpeed = 0.05f } // Analóg
             2 -> { attackSpeed = 0.40f; decaySpeed = 0.08f } // PPM
             3 -> { 
@@ -189,6 +211,12 @@ class StereoVuView(context: Context) : FrameLayout(context) {
             }
         }
 
+        targetDecay = prefs.getFloat("target_decay", 0.94f)
+        peakHoldMs = prefs.getLong("peak_hold_ms", 900L)
+        peakDecay = prefs.getFloat("peak_decay", 0.985f)
+        analogSpring = prefs.getFloat("analog_spring", 0.15f)
+        analogDamp = prefs.getFloat("analog_damp", 0.25f)
+
         gain = prefs.getFloat("gain", 1.0f)
         opacity = prefs.getInt("opacity", 204)
         themeId = prefs.getInt("theme", 0)
@@ -197,7 +225,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                    else if (prefs.getBoolean("colored_peak", false)) 1 else 0
         setBackgroundColor(Color.argb(opacity, 0, 0, 0))
         updateThemeColors()
-        if (oldScale != sizeScale || oldLedCount != ledCount || oldHoriz != isHorizontal) {
+        if (oldScale != sizeScale || oldLedCount != ledCount || oldHoriz != isHorizontal || oldDbScale != fxDbScale) {
             requestLayout()
             params?.let { windowManager?.updateViewLayout(this, it) }
         }
@@ -222,9 +250,9 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                 paintGreen.color = Color.parseColor("#FFC107"); paintYellow.color = Color.parseColor("#FF6B35"); paintRed.color = Color.parseColor("#E91E63")
                 paintOffGreen.color = Color.parseColor("#181008"); paintOffYellow.color = Color.parseColor("#180800"); paintOffRed.color = Color.parseColor("#180010")
             }
-            5 -> { // VFD (Klasszikus Cián)
-                val vfdCyan = Color.parseColor("#00E5FF")
-                val vfdDim = Color.parseColor("#002228")
+            5 -> { // VFD (Klasszikus Videoton Cián - meleg zöldes-cián és sötét teal)
+                val vfdCyan = Color.parseColor("#00D4E8")
+                val vfdDim = Color.parseColor("#001F26")
                 paintGreen.color = vfdCyan; paintYellow.color = vfdCyan; paintRed.color = vfdCyan
                 paintOffGreen.color = vfdDim; paintOffYellow.color = vfdDim; paintOffRed.color = vfdDim
             }
@@ -238,22 +266,22 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     override fun onDetachedFromWindow() { prefs.unregisterOnSharedPreferenceChangeListener(prefListener); super.onDetachedFromWindow() }
     fun setWindowParams(wm: WindowManager, p: WindowManager.LayoutParams) { windowManager = wm; params = p }
 
-    fun updateLevels(rmsL: Float, rmsR: Float) {
-        fun toLevel(rms: Float): Float {
-            val db = 20f * log10((rms * 3f * gain).coerceAtLeast(0.0001f))
+    fun updateLevels(rawL: Float, rawR: Float) {
+        fun toLevel(signal: Float): Float {
+            val db = 20f * log10((signal * 3f * gain).coerceAtLeast(0.0001f))
             return ((db + 50f) / 50f).coerceIn(0f, 1f)
         }
-        targetL = max(targetL, toLevel(rmsL))
-        targetR = max(targetR, toLevel(rmsR))
+        targetL = max(targetL, toLevel(rawL))
+        targetR = max(targetR, toLevel(rawR))
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         if (isHorizontal) {
             val baseW = 40f + ledCount * (ledH + ledGap) + 20f
-            val baseH = 20f + colW + 16f + 20f + colW + 20f
+            val baseH = if (fxDbScale) (20f + colW + 16f + 20f + colW + 20f) else (20f + colW + 12f + colW + 20f)
             setMeasuredDimension((baseW * sizeScale).toInt(), (baseH * sizeScale).toInt())
         } else {
-            val baseW = xScale + 32f
+            val baseW = if (fxDbScale) (xScale + 32f) else (xR + colW + 16f)
             val baseH = topY + ledCount * (ledH + ledGap) - ledGap + 10f
             setMeasuredDimension((baseW * sizeScale).toInt(), (baseH * sizeScale).toInt())
         }
@@ -277,18 +305,29 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         val totalW = xScale + 32f
         val totalH = topY + ledCount * (ledH + ledGap) - ledGap + 10f
         val bezelRect = RectF(0f, 0f, totalW, totalH)
-        canvas.drawRoundRect(bezelRect, 8f, 8f, paintBezel)
-        canvas.drawRoundRect(bezelRect, 8f, 8f, paintBezelBorder)
+        val vfdBezel = if (themeId == 5) Paint().apply { color = Color.parseColor("#0A1215") } else paintBezel
+        val vfdBorder = if (themeId == 5) Paint().apply { color = Color.parseColor("#003840"); style = Paint.Style.STROKE; strokeWidth = 2f } else paintBezelBorder
+        canvas.drawRoundRect(bezelRect, 8f, 8f, vfdBezel)
+        canvas.drawRoundRect(bezelRect, 8f, 8f, vfdBorder)
 
         val grooveX = xL + colW + 2f
-        canvas.drawRoundRect(RectF(grooveX, topY - 4f, grooveX + 10f, totalH - 6f), 3f, 3f, paintGroove)
+        val vfdGroove = if (themeId == 5) Paint().apply { color = Color.parseColor("#040B0D") } else paintGroove
+        canvas.drawRoundRect(RectF(grooveX, topY - 4f, grooveX + 10f, totalH - 6f), 3f, 3f, vfdGroove)
+
+        if (themeId == 5) {
+            paintChanLabel.color = Color.parseColor("#66C0CC")
+        } else {
+            paintChanLabel.color = Color.WHITE
+        }
 
         canvas.drawText("L", xL + colW / 2f, topY - 8f, paintChanLabel)
         canvas.drawText("R", xR + colW / 2f, topY - 8f, paintChanLabel)
 
         drawTower(canvas, xL, levelL.coerceIn(0f, 1f), peakL, peakAlphaL)
         drawTower(canvas, xR, levelR.coerceIn(0f, 1f), peakR, peakAlphaR)
-        drawScale(canvas, xScale, topY)
+        if (fxDbScale) {
+            drawScale(canvas, xScale, topY)
+        }
 
         if (themeId == 5) {
             val wirePaint = Paint().apply {
@@ -308,24 +347,35 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         val startX = 40f
         val yL = 20f
         val yScale = yL + colW + 12f
-        val yR = yScale + 16f
+        val yR = if (fxDbScale) (yScale + 16f) else (yL + colW + 12f)
         
         val totalW = startX + ledCount * (ledH + ledGap) + 20f
         val totalH = yR + colW + 16f
         
         val bezelRect = RectF(0f, 0f, totalW, totalH)
-        canvas.drawRoundRect(bezelRect, 8f, 8f, paintBezel)
-        canvas.drawRoundRect(bezelRect, 8f, 8f, paintBezelBorder)
+        val vfdBezel = if (themeId == 5) Paint().apply { color = Color.parseColor("#0A1215") } else paintBezel
+        val vfdBorder = if (themeId == 5) Paint().apply { color = Color.parseColor("#003840"); style = Paint.Style.STROKE; strokeWidth = 2f } else paintBezelBorder
+        canvas.drawRoundRect(bezelRect, 8f, 8f, vfdBezel)
+        canvas.drawRoundRect(bezelRect, 8f, 8f, vfdBorder)
 
         val grooveY = yL + colW + 2f
-        canvas.drawRoundRect(RectF(startX - 4f, grooveY, totalW - 6f, grooveY + 8f), 3f, 3f, paintGroove)
+        val vfdGroove = if (themeId == 5) Paint().apply { color = Color.parseColor("#040B0D") } else paintGroove
+        canvas.drawRoundRect(RectF(startX - 4f, grooveY, totalW - 6f, grooveY + 8f), 3f, 3f, vfdGroove)
+
+        if (themeId == 5) {
+            paintChanLabel.color = Color.parseColor("#66C0CC")
+        } else {
+            paintChanLabel.color = Color.WHITE
+        }
 
         canvas.drawText("L", 16f, yL + colW / 2f + paintChanLabel.textSize / 3f, paintChanLabel)
         canvas.drawText("R", 16f, yR + colW / 2f + paintChanLabel.textSize / 3f, paintChanLabel)
 
         drawTowerHorizontal(canvas, startX, yL, levelL.coerceIn(0f, 1f), peakL, peakAlphaL)
         drawTowerHorizontal(canvas, startX, yR, levelR.coerceIn(0f, 1f), peakR, peakAlphaR)
-        drawScaleHorizontal(canvas, startX, yScale)
+        if (fxDbScale) {
+            drawScaleHorizontal(canvas, startX, yScale)
+        }
 
         if (themeId == 5) {
             val wirePaint = Paint().apply {
@@ -344,12 +394,22 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     private fun drawScale(c: Canvas, x: Float, startY: Float) {
         data class Mark(val ledIdxFromBottom: Int, val label: String)
         val marks = listOf(
-            Mark(ledCount - 1, " 0"), 
-            Mark((ledCount * 0.85).toInt(), "-6"), 
-            Mark((ledCount * 0.65).toInt(), "-10"), 
-            Mark((ledCount * 0.35).toInt(), "-20"), 
+            Mark(ledCount - 1, " 0"),
+            Mark((ledCount * 0.91).toInt(), "-3"),
+            Mark((ledCount * 0.85).toInt(), "-6"),
+            Mark((ledCount * 0.65).toInt(), "-10"),
+            Mark((ledCount * 0.35).toInt(), "-20"),
             Mark(1, "-∞")
         )
+
+        if (themeId == 5) {
+            paintScaleTick.color = Color.parseColor("#006A75")
+            paintScaleText.color = Color.parseColor("#4DAEB8")
+        } else {
+            paintScaleTick.color = Color.parseColor("#666666")
+            paintScaleText.color = Color.parseColor("#888888")
+        }
+
         for (m in marks) {
             val idxFromTop = ledCount - 1 - m.ledIdxFromBottom
             val centerY = startY + idxFromTop * (ledH + ledGap) + ledH / 2f
@@ -365,8 +425,17 @@ class StereoVuView(context: Context) : FrameLayout(context) {
             Mark((ledCount * 0.35).toInt(), "-20"),
             Mark((ledCount * 0.65).toInt(), "-10"),
             Mark((ledCount * 0.85).toInt(), "-6"),
+            Mark((ledCount * 0.91).toInt(), "-3"),
             Mark(ledCount - 1, " 0")
         )
+
+        if (themeId == 5) {
+            paintScaleTick.color = Color.parseColor("#006A75")
+            paintScaleText.color = Color.parseColor("#4DAEB8")
+        } else {
+            paintScaleTick.color = Color.parseColor("#666666")
+            paintScaleText.color = Color.parseColor("#888888")
+        }
         
         for (m in marks) {
             val centerX = startX + m.ledIdx * (ledH + ledGap) + ledH / 2f
@@ -417,17 +486,20 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                     val subLeft = x + j * (subW + subGap)
                     val rect = RectF(subLeft, top, subLeft + subW, top + ledH)
                     
-                    val paint = if (isOn) paintGreen else paintOffGreen
+                    val paint = if (isOn) paintGreen else (if (fxGhost) paintOffGreen else Paint().apply { color = Color.TRANSPARENT })
                     c.drawRoundRect(rect, r - 2f, r - 2f, paint)
                     
                     if (isOn) {
-                        paintGlow.set(paint)
-                        paintGlow.setShadowLayer(10f, 0f, 0f, paint.color)
-                        c.drawRoundRect(rect, r - 2f, r - 2f, paintGlow)
-
-                        // Stronger sheer/glare for realism
-                        val glareRect = RectF(subLeft + 1f, top + 1f, subLeft + subW - 1f, top + ledH * 0.4f)
-                        c.drawRoundRect(glareRect, r - 2f, r - 2f, paintSheen)
+                        if (fxGlow) {
+                            val glowRadius = 10f + level * 10f
+                            paintGlow.set(paint)
+                            paintGlow.setShadowLayer(glowRadius, 0f, 0f, Color.parseColor("#00D4E8"))
+                            c.drawRoundRect(rect, r - 2f, r - 2f, paintGlow)
+                        }
+                        if (fxSheen) {
+                            val glareRect = RectF(subLeft + 1f, top + 1f, subLeft + subW - 1f, top + ledH * 0.35f)
+                            c.drawRoundRect(glareRect, r - 2f, r - 2f, paintSheen)
+                        }
                     }
                     
                     if (globalIdx == peakSegment && peakAlpha > 0f && peak > 0.05f) {
@@ -448,17 +520,22 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                 val isRed = idxFromBottom >= redThreshold
                 val isYellow = idxFromBottom in yellowThreshold until redThreshold
                 val paint = when {
-                    isRed -> if (isOn) paintRed else paintOffRed
-                    isYellow -> if (isOn) paintYellow else paintOffYellow
-                    else -> if (isOn) paintGreen else paintOffGreen
+                    isRed -> if (isOn) paintRed else (if (fxGhost) paintOffRed else Paint().apply { color = Color.TRANSPARENT })
+                    isYellow -> if (isOn) paintYellow else (if (fxGhost) paintOffYellow else Paint().apply { color = Color.TRANSPARENT })
+                    else -> if (isOn) paintGreen else (if (fxGhost) paintOffGreen else Paint().apply { color = Color.TRANSPARENT })
                 }
                 c.drawRoundRect(rect, r, r, paint)
                 if (isOn) {
-                    val glowRadius = if (isRed) 14f else if (isYellow) 10f else 8f
-                    paintGlow.set(paint)
-                    paintGlow.setShadowLayer(glowRadius, 0f, 0f, paint.color)
-                    c.drawRoundRect(rect, r, r, paintGlow)
-                    c.drawRoundRect(RectF(x + 2f, top + 1.5f, x + colW - 2f, top + ledH * 0.38f), r - 1f, r - 1f, paintSheen)
+                    if (fxGlow) {
+                        val baseGlow = if (isRed) 14f else if (isYellow) 10f else 8f
+                        val glowRadius = baseGlow + level * 6f
+                        paintGlow.set(paint)
+                        paintGlow.setShadowLayer(glowRadius, 0f, 0f, paint.color)
+                        c.drawRoundRect(rect, r, r, paintGlow)
+                    }
+                    if (fxSheen) {
+                        c.drawRoundRect(RectF(x + 2f, top + 1.5f, x + colW - 2f, top + ledH * 0.38f), r - 1f, r - 1f, paintSheen)
+                    }
                 }
                 if (idxFromBottom == peakLed && peakAlpha > 0f && peak > 0.05f) {
                     val pPaint = getPeakPaint(isRed, isYellow)
@@ -495,17 +572,20 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                     val subTop = y + (3 - j) * (subH + subGap) // drawing from bottom to top within the block
                     val rect = RectF(left, subTop, left + ledH, subTop + subH)
                     
-                    val paint = if (isOn) paintGreen else paintOffGreen
+                    val paint = if (isOn) paintGreen else (if (fxGhost) paintOffGreen else Paint().apply { color = Color.TRANSPARENT })
                     c.drawRoundRect(rect, r - 1f, r - 1f, paint)
                     
                     if (isOn) {
-                        paintGlow.set(paint)
-                        paintGlow.setShadowLayer(10f, 0f, 0f, paint.color)
-                        c.drawRoundRect(rect, r - 1f, r - 1f, paintGlow)
-
-                        // Stronger sheer/glare for realism
-                        val glareRect = RectF(left + 1f, subTop + 1f, left + ledH * 0.4f, subTop + subH - 1f)
-                        c.drawRoundRect(glareRect, r - 1f, r - 1f, paintSheen)
+                        if (fxGlow) {
+                            val glowRadius = 10f + level * 10f
+                            paintGlow.set(paint)
+                            paintGlow.setShadowLayer(glowRadius, 0f, 0f, Color.parseColor("#00D4E8"))
+                            c.drawRoundRect(rect, r - 1f, r - 1f, paintGlow)
+                        }
+                        if (fxSheen) {
+                            val glareRect = RectF(left + 1f, subTop + 1f, left + ledH * 0.35f, subTop + subH - 1f)
+                            c.drawRoundRect(glareRect, r - 1f, r - 1f, paintSheen)
+                        }
                     }
                     
                     if (globalIdx == peakSegment && peakAlpha > 0f && peak > 0.05f) {
@@ -527,21 +607,24 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                 val isYellow = i in yellowThreshold until redThreshold
                 
                 val paint = when {
-                    isRed -> if (isOn) paintRed else paintOffRed
-                    isYellow -> if (isOn) paintYellow else paintOffYellow
-                    else -> if (isOn) paintGreen else paintOffGreen
+                    isRed -> if (isOn) paintRed else (if (fxGhost) paintOffRed else Paint().apply { color = Color.TRANSPARENT })
+                    isYellow -> if (isOn) paintYellow else (if (fxGhost) paintOffYellow else Paint().apply { color = Color.TRANSPARENT })
+                    else -> if (isOn) paintGreen else (if (fxGhost) paintOffGreen else Paint().apply { color = Color.TRANSPARENT })
                 }
                 
                 c.drawRoundRect(rect, r, r, paint)
                 
                 if (isOn) {
-                    val glowRadius = if (isRed) 14f else if (isYellow) 10f else 8f
-                    paintGlow.set(paint)
-                    paintGlow.setShadowLayer(glowRadius, 0f, 0f, paint.color)
-                    c.drawRoundRect(rect, r, r, paintGlow)
-                    
-                    // Sheen
-                    c.drawRoundRect(RectF(left + 1f, y + 1.5f, left + ledH * 0.38f, y + colW - 1.5f), r - 1f, r - 1f, paintSheen)
+                    if (fxGlow) {
+                        val baseGlow = if (isRed) 14f else if (isYellow) 10f else 8f
+                        val glowRadius = baseGlow + level * 6f
+                        paintGlow.set(paint)
+                        paintGlow.setShadowLayer(glowRadius, 0f, 0f, paint.color)
+                        c.drawRoundRect(rect, r, r, paintGlow)
+                    }
+                    if (fxSheen) {
+                        c.drawRoundRect(RectF(left + 1f, y + 1.5f, left + ledH * 0.38f, y + colW - 1.5f), r - 1f, r - 1f, paintSheen)
+                    }
                 }
                 
                 if (i == peakLed && peakAlpha > 0f && peak > 0.05f) {

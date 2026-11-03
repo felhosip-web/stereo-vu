@@ -3,6 +3,7 @@ package com.example.stereovu
 import android.app.*
 import android.content.Context
 import android.content.Intent
+import android.content.SharedPreferences
 import android.graphics.PixelFormat
 import android.media.AudioAttributes
 import android.media.AudioFormat
@@ -20,7 +21,15 @@ class FloatingVuService : Service() {
     private var vuView: StereoVuView? = null
     private var audioRecord: AudioRecord? = null
     private var running = true
-    private var amplitudeCount = 32767.0
+    @Volatile private var amplitudeCount = 32767.0
+    @Volatile private var detectionMode = 0 // 0 = Peak, 1 = RMS
+
+    private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
+        when (key) {
+            "amplitude_count" -> amplitudeCount = prefs.getInt("amplitude_count", 32767).toDouble()
+            "detection_mode" -> detectionMode = prefs.getInt("detection_mode", 0)
+        }
+    }
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -28,6 +37,8 @@ class FloatingVuService : Service() {
         super.onCreate()
         val prefs = getSharedPreferences("StereoVuPrefs", Context.MODE_PRIVATE)
         amplitudeCount = prefs.getInt("amplitude_count", 32767).toDouble()
+        detectionMode = prefs.getInt("detection_mode", 0)
+        prefs.registerOnSharedPreferenceChangeListener(prefListener)
         
         startForegroundNotification()
     }
@@ -42,6 +53,7 @@ class FloatingVuService : Service() {
         // Frissítjük a beállításokat induláskor
         val prefs = getSharedPreferences("StereoVuPrefs", Context.MODE_PRIVATE)
         amplitudeCount = prefs.getInt("amplitude_count", 32767).toDouble()
+        detectionMode = prefs.getInt("detection_mode", 0)
         
         showOverlay()
         startAudioCapture(captureIntent)
@@ -137,25 +149,44 @@ class FloatingVuService : Service() {
                 while (running) {
                     val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
                     if (read > 0) {
-                        var sumL = 0.0
-                        var sumR = 0.0
-                        var count = 0
-                        var i = 0
-                        
-                        // Dinamikus Amplitude Count beállítás alkalmazása
                         val maxAmp = amplitudeCount
-                        
-                        while (i < read - 1) {
-                            val l = buffer[i].toDouble() / maxAmp
-                            val r = buffer[i+1].toDouble() / maxAmp
-                            sumL += l*l
-                            sumR += r*r
-                            count++
-                            i+=2
+                        val isRms = (detectionMode == 1)
+
+                        var valL: Float
+                        var valR: Float
+
+                        if (isRms) {
+                            var sumL = 0.0
+                            var sumR = 0.0
+                            var count = 0
+                            var i = 0
+                            while (i < read - 1) {
+                                val l = buffer[i].toDouble() / maxAmp
+                                val r = buffer[i + 1].toDouble() / maxAmp
+                                sumL += l * l
+                                sumR += r * r
+                                count++
+                                i += 2
+                            }
+                            valL = if (count > 0) Math.sqrt(sumL / count).toFloat() else 0f
+                            valR = if (count > 0) Math.sqrt(sumR / count).toFloat() else 0f
+                        } else {
+                            // Peak mód: a puffer legmagasabb abszolút csúcsértéke
+                            var maxL = 0.0
+                            var maxR = 0.0
+                            var i = 0
+                            while (i < read - 1) {
+                                val l = Math.abs(buffer[i].toDouble()) / maxAmp
+                                val r = Math.abs(buffer[i + 1].toDouble()) / maxAmp
+                                if (l > maxL) maxL = l
+                                if (r > maxR) maxR = r
+                                i += 2
+                            }
+                            valL = maxL.toFloat()
+                            valR = maxR.toFloat()
                         }
-                        val rmsL = Math.sqrt(sumL / count).toFloat()
-                        val rmsR = Math.sqrt(sumR / count).toFloat()
-                        vuView?.post { vuView?.updateLevels(rmsL, rmsR) }
+
+                        vuView?.post { vuView?.updateLevels(valL, valR) }
                     }
                 }
             } catch (e: Exception) {
@@ -166,6 +197,8 @@ class FloatingVuService : Service() {
 
     override fun onDestroy() {
         running = false
+        val prefs = getSharedPreferences("StereoVuPrefs", Context.MODE_PRIVATE)
+        prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
         audioRecord?.stop()
         audioRecord?.release()
         audioRecord = null

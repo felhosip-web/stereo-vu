@@ -63,6 +63,15 @@ class SettingsDialog(QDialog):
         hint_label.setStyleSheet("color: gray; font-size: 10px;")
         layout.addRow("", hint_label)
 
+        self.detection_combo = QComboBox()
+        self.detection_combo.addItems(["Peak (Csúcsérték)", "RMS (Négyzetes középérték)"])
+        self.detection_combo.setCurrentIndex(self.settings.value("detection_mode", 0, type=int))
+        layout.addRow("Detektálási mód:", self.detection_combo)
+
+        self.layout_check = QCheckBox("Vízszintes elrendezés (L fent, R lent)")
+        self.layout_check.setChecked(self.settings.value("horizontal", False, type=bool))
+        layout.addRow("Elrendezés:", self.layout_check)
+
         self.mode_combo = QComboBox()
         self.mode_combo.addItems(["Digitális Peak", "Analóg VU", "PPM", "Egyéni"])
         self.mode_combo.setCurrentIndex(self.settings.value("mode", 0, type=int))
@@ -99,7 +108,56 @@ class SettingsDialog(QDialog):
             self.peak_combo.setCurrentIndex(1 if old_colored else 0)
             
         layout.addRow("Peak LED stílusa:", self.peak_combo)
+
+        # Új ballisztika beállítások
+        self.target_decay_slider = QSlider(Qt.Orientation.Horizontal)
+        self.target_decay_slider.setRange(880, 970)
+        self.target_decay_slider.setValue(int(self.settings.value("target_decay", 0.94, type=float) * 1000))
+        layout.addRow("Célérték elengedés (0.88-0.97):", self.target_decay_slider)
+
+        self.peak_hold_slider = QSlider(Qt.Orientation.Horizontal)
+        self.peak_hold_slider.setRange(200, 3000)
+        # Migrate or fallback: ha korábban képkocka (10..180) volt elmentve, skálázzuk fel ms-be
+        saved_peak_hold = self.settings.value("peak_hold_ms", self.settings.value("peak_hold", 900, type=int), type=int)
+        if saved_peak_hold <= 180:
+            saved_peak_hold = int(saved_peak_hold * 16.6)
+        self.peak_hold_slider.setValue(saved_peak_hold)
+        layout.addRow("Peak tartási idő (200-3000 ms):", self.peak_hold_slider)
+
+        self.peak_decay_slider = QSlider(Qt.Orientation.Horizontal)
+        self.peak_decay_slider.setRange(900, 995)
+        self.peak_decay_slider.setValue(int(self.settings.value("peak_decay", 0.985, type=float) * 1000))
+        layout.addRow("Peak lecsengés (0.900-0.995):", self.peak_decay_slider)
+
+        self.spring_slider = QSlider(Qt.Orientation.Horizontal)
+        self.spring_slider.setRange(5, 40)
+        self.spring_slider.setValue(int(self.settings.value("analog_spring", 0.15, type=float) * 100))
+        layout.addRow("Analóg Rugó (0.05-0.40):", self.spring_slider)
+
+        self.damp_slider = QSlider(Qt.Orientation.Horizontal)
+        self.damp_slider.setRange(10, 40)
+        self.damp_slider.setValue(int(self.settings.value("analog_damp", 0.25, type=float) * 100))
+        layout.addRow("Analóg Csillapítás (0.10-0.40):", self.damp_slider)
         
+        # Visual Effects (Látvány effektusok)
+        layout.addRow("--- Látvány effektusok / Visual Effects ---", QLabel(""))
+
+        self.fx_glow_check = QCheckBox("LED Ragyogás (Glow)")
+        self.fx_glow_check.setChecked(self.settings.value("fx_glow", True, type=bool))
+        layout.addRow("LED Ragyogás:", self.fx_glow_check)
+
+        self.fx_sheen_check = QCheckBox("Belső Fény / Csillanás (Sheen)")
+        self.fx_sheen_check.setChecked(self.settings.value("fx_sheen", True, type=bool))
+        layout.addRow("LED Csillanás:", self.fx_sheen_check)
+
+        self.fx_ghost_check = QCheckBox("Halvány inaktív LED-ek (Ghost LEDs)")
+        self.fx_ghost_check.setChecked(self.settings.value("fx_ghost", True, type=bool))
+        layout.addRow("Ghost LED-ek:", self.fx_ghost_check)
+
+        self.fx_db_scale_check = QCheckBox("dB Skála feliratok megjelenítése")
+        self.fx_db_scale_check.setChecked(self.settings.value("fx_db_scale", True, type=bool))
+        layout.addRow("dB Skála:", self.fx_db_scale_check)
+
         self.attack_slider = QSlider(Qt.Orientation.Horizontal)
         self.attack_slider.setRange(5, 100)
         self.attack_slider.setValue(int(self.settings.value("attack_speed", 0.35, type=float) * 100))
@@ -128,15 +186,27 @@ class SettingsDialog(QDialog):
     def save_settings(self):
         # Save the hidden raw device name instead of the formatted text
         self.settings.setValue("input_device", self.device_combo.currentData())
+        self.settings.setValue("detection_mode", self.detection_combo.currentIndex())
+        self.settings.setValue("horizontal", self.layout_check.isChecked())
         self.settings.setValue("mode", self.mode_combo.currentIndex())
         self.settings.setValue("led_count", self.led_slider.value())
         self.settings.setValue("theme", self.theme_combo.currentIndex())
         self.settings.setValue("size_scale", self.scale_slider.value() / 100.0)
         self.settings.setValue("opacity", self.opacity_slider.value())
         self.settings.setValue("peak_mode", self.peak_combo.currentIndex())
+        self.settings.setValue("target_decay", self.target_decay_slider.value() / 1000.0)
+        self.settings.setValue("peak_hold_ms", self.peak_hold_slider.value())
+        self.settings.setValue("peak_hold", self.peak_hold_slider.value())
+        self.settings.setValue("peak_decay", self.peak_decay_slider.value() / 1000.0)
+        self.settings.setValue("analog_spring", self.spring_slider.value() / 100.0)
+        self.settings.setValue("analog_damp", self.damp_slider.value() / 100.0)
         self.settings.setValue("attack_speed", self.attack_slider.value() / 100.0)
         self.settings.setValue("decay_speed", self.decay_slider.value() / 100.0)
         self.settings.setValue("gain", self.gain_slider.value() / 100.0)
+        self.settings.setValue("fx_glow", self.fx_glow_check.isChecked())
+        self.settings.setValue("fx_sheen", self.fx_sheen_check.isChecked())
+        self.settings.setValue("fx_ghost", self.fx_ghost_check.isChecked())
+        self.settings.setValue("fx_db_scale", self.fx_db_scale_check.isChecked())
         self.accept()
 
 class VuMeter(QWidget):
@@ -210,15 +280,17 @@ class VuMeter(QWidget):
         self.theme_id = self.settings.value("theme", 0, type=int)
         self.size_scale = self.settings.value("size_scale", 1.0, type=float)
         self.bg_opacity = self.settings.value("opacity", 204, type=int)
+        self.detection_mode = self.settings.value("detection_mode", 0, type=int) # 0 = Peak, 1 = RMS
+        self.is_horizontal = self.settings.value("horizontal", False, type=bool)
         
         if self.settings.contains("peak_mode"):
             self.peak_mode = self.settings.value("peak_mode", 0, type=int)
         else:
             self.peak_mode = 1 if self.settings.value("colored_peak", False, type=bool) else 0
             
-        if self.mode == 0: # Digital
-            self.attack_speed = 0.80
-            self.decay_speed = 0.20
+        if self.mode == 0: # Digital Peak: gyorsabb felfutás, lassabb karakteres lecsengés
+            self.attack_speed = 0.90
+            self.decay_speed = 0.12
         elif self.mode == 1: # Analog
             self.attack_speed = 0.10
             self.decay_speed = 0.05
@@ -230,42 +302,67 @@ class VuMeter(QWidget):
             self.decay_speed = self.settings.value("decay_speed", 0.12, type=float)
             
         self.digital_gain = self.settings.value("gain", 1.0, type=float)
+        self.target_decay = self.settings.value("target_decay", 0.94, type=float)
+        # Unify peak hold to milliseconds (peak_hold_ms) and convert to frame count (16ms per frame)
+        saved_peak_hold = self.settings.value("peak_hold_ms", self.settings.value("peak_hold", 900, type=int), type=int)
+        if saved_peak_hold <= 180:
+            saved_peak_hold = int(saved_peak_hold * 16.6)
+        self.peak_hold_ms = saved_peak_hold
+        self.peak_hold_time = max(1, int(round(self.peak_hold_ms / 16.0)))
+        self.peak_decay_rate = self.settings.value("peak_decay", 0.985, type=float)
+        self.analog_spring = self.settings.value("analog_spring", 0.15, type=float)
+        self.analog_damp = self.settings.value("analog_damp", 0.25, type=float)
+
+        self.fx_glow = self.settings.value("fx_glow", True, type=bool)
+        self.fx_sheen = self.settings.value("fx_sheen", True, type=bool)
+        self.fx_ghost = self.settings.value("fx_ghost", True, type=bool)
+        self.fx_db_scale = self.settings.value("fx_db_scale", True, type=bool)
         
-        # Calculate width dynamically based on LEDs
-        # Horizontal layout: L channel on top, R channel on bottom (or vertical?)
-        # Wait, the current python implementation uses vertical bars, left and right.
-        # "led_w" = 11, "gap" = 2. It draws horizontally?
-        # Let's check: x = start_x + i * (led_w + gap). Yes, it's horizontal bars like a stereo rack!
-        
-        base_w = 40 + self.num_leds * 13
-        base_h = 80
+        # Ablak méretezése az elrendezés (vízszintes vs függőleges) és LED szám szerint
+        if self.is_horizontal:
+            # L fent, R lent: szélesség a LED-ek szerint nyúlik el
+            base_w = 40 + self.num_leds * 13 + (15 if self.fx_db_scale else 0)
+            base_h = 92 if self.fx_db_scale else 78
+        else:
+            # Függőleges tornyok (mint az Android alapértelmezett oszlopos nézete):
+            # 2 oszlop egymás mellett + skála
+            base_w = 125 if self.fx_db_scale else 100
+            base_h = 36 + self.num_leds * 13
+
         self.resize(int(base_w * self.size_scale), int(base_h * self.size_scale))
         self.update()
 
     def audio_callback(self, indata, frames, time, status):
-        rms_l = np.sqrt(np.mean(indata[:, 0]**2))
-        rms_r = np.sqrt(np.mean(indata[:, 1]**2))
-        def to_level(rms):
-            db = 20 * math.log10(max(rms, 0.0001))
+        if self.detection_mode == 1: # RMS
+            val_l = np.sqrt(np.mean(indata[:, 0]**2))
+            val_r = np.sqrt(np.mean(indata[:, 1]**2))
+        else: # Peak (abszolút csúcsérték az adott pufferben)
+            val_l = np.max(np.abs(indata[:, 0]))
+            val_r = np.max(np.abs(indata[:, 1]))
+
+        def to_level(signal):
+            db = 20 * math.log10(max(signal, 0.0001))
             return max(0.0, min(1.0, (db + 50) / 50))
             
-        self.target_l = min(1.0, to_level(rms_l * 3.0 * self.digital_gain))
-        self.target_r = min(1.0, to_level(rms_r * 3.0 * self.digital_gain))
+        new_target_l = to_level(val_l * 3.0 * self.digital_gain)
+        new_target_r = to_level(val_r * 3.0 * self.digital_gain)
+
+        # Csúcs-követő (peak follower): azonnal felugrik, majd a ciklusban fokozatosan halkul
+        self.target_l = min(1.0, max(self.target_l, new_target_l))
+        self.target_r = min(1.0, max(self.target_r, new_target_r))
 
     def update_meter(self):
         if self.mode == 1:
-            # Analog spring physics
-            spring = 0.15
-            damp = 0.25
-            self.vel_l += (self.target_l - self.level_l) * spring
-            self.vel_l *= (1.0 - damp)
+            # Analog spring physics finomhangolható rugó és csillapítás paraméterekkel
+            self.vel_l += (self.target_l - self.level_l) * self.analog_spring
+            self.vel_l *= (1.0 - self.analog_damp)
             self.level_l += self.vel_l
             
-            self.vel_r += (self.target_r - self.level_r) * spring
-            self.vel_r *= (1.0 - damp)
+            self.vel_r += (self.target_r - self.level_r) * self.analog_spring
+            self.vel_r *= (1.0 - self.analog_damp)
             self.level_r += self.vel_r
             
-            # Allow overshoot internally, but clamp roughly
+            # Bouncing overshoot korlátozása
             self.level_l = max(0.0, min(1.2, self.level_l))
             self.level_r = max(0.0, min(1.2, self.level_r))
         else:
@@ -284,17 +381,21 @@ class VuMeter(QWidget):
 
         if display_l > self.peak_l:
             self.peak_l = display_l
-            self.peak_hold_l = 60
+            self.peak_hold_l = self.peak_hold_time
         else:
             if self.peak_hold_l > 0: self.peak_hold_l -= 1
-            else: self.peak_l *= 0.95
+            else: self.peak_l *= self.peak_decay_rate
             
         if display_r > self.peak_r:
             self.peak_r = display_r
-            self.peak_hold_r = 60
+            self.peak_hold_r = self.peak_hold_time
         else:
             if self.peak_hold_r > 0: self.peak_hold_r -= 1
-            else: self.peak_r *= 0.95
+            else: self.peak_r *= self.peak_decay_rate
+
+        # Célérték fokozatos elengedése (release decay)
+        self.target_l *= self.target_decay
+        self.target_r *= self.target_decay
             
         self.update()
 
@@ -302,30 +403,116 @@ class VuMeter(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        painter.setBrush(QColor(0, 0, 0, self.bg_opacity))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawRoundedRect(self.rect(), int(10 * self.size_scale), int(10 * self.size_scale))
+        if self.theme_id == 5:
+            # Sötét fekete-teal panel Videoton stílusban
+            painter.setBrush(QColor(10, 18, 21, self.bg_opacity))
+            painter.setPen(QColor(0, 56, 64, 180))
+            painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), int(10 * self.size_scale), int(10 * self.size_scale))
+        else:
+            painter.setBrush(QColor(0, 0, 0, self.bg_opacity))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(self.rect(), int(10 * self.size_scale), int(10 * self.size_scale))
         
         display_l = max(0.0, min(1.0, self.level_l))
         display_r = max(0.0, min(1.0, self.level_r))
-        self.draw_channel(painter, display_l, self.peak_l, int(12 * self.size_scale), "L")
-        self.draw_channel(painter, display_r, self.peak_r, int(45 * self.size_scale), "R")
 
-        if self.theme_id == 5:
-            painter.setPen(QColor(255, 255, 255, 45))
-            y_l = int(12 * self.size_scale)
-            y_r = int(45 * self.size_scale)
-            led_h = int(18 * self.size_scale)
+        if self.is_horizontal:
+            # Vízszintes sávok (L fent, R lent)
             start_x = int(35 * self.size_scale)
-            end_x = self.width() - int(10 * self.size_scale)
-            
-            painter.drawLine(start_x, y_l + int(led_h * 0.25), end_x, y_l + int(led_h * 0.25))
-            painter.drawLine(start_x, y_l + int(led_h * 0.75), end_x, y_l + int(led_h * 0.75))
-            painter.drawLine(start_x, y_r + int(led_h * 0.25), end_x, y_r + int(led_h * 0.25))
-            painter.drawLine(start_x, y_r + int(led_h * 0.75), end_x, y_r + int(led_h * 0.75))
+            y_l = int(10 * self.size_scale)
+            y_scale = int(34 * self.size_scale)
+            y_r = int(48 * self.size_scale) if self.fx_db_scale else int(38 * self.size_scale)
+            self.draw_channel_horizontal(painter, display_l, self.peak_l, y_l, "L")
+            if self.fx_db_scale:
+                self.draw_scale_horizontal(painter, start_x, y_scale)
+            self.draw_channel_horizontal(painter, display_r, self.peak_r, y_r, "R")
 
-    def draw_channel(self, painter, level, peak, y_offset, label):
-        painter.setPen(QColor(255, 255, 255))
+            if self.theme_id == 5:
+                painter.setPen(QColor(255, 255, 255, 45))
+                led_h = int(18 * self.size_scale)
+                end_x = start_x + int(self.num_leds * 13 * self.size_scale)
+
+                painter.drawLine(start_x, y_l + int(led_h * 0.25), end_x, y_l + int(led_h * 0.25))
+                painter.drawLine(start_x, y_l + int(led_h * 0.75), end_x, y_l + int(led_h * 0.75))
+                painter.drawLine(start_x, y_r + int(led_h * 0.25), end_x, y_r + int(led_h * 0.25))
+                painter.drawLine(start_x, y_r + int(led_h * 0.75), end_x, y_r + int(led_h * 0.75))
+        else:
+            # Függőleges tornyok (L bal, R jobb + dB skála)
+            col_w = int(34 * self.size_scale)
+            x_l = int(14 * self.size_scale)
+            x_r = int(54 * self.size_scale)
+            x_scale = int(94 * self.size_scale)
+            self.draw_channel_vertical(painter, display_l, self.peak_l, x_l, col_w, "L")
+            self.draw_channel_vertical(painter, display_r, self.peak_r, x_r, col_w, "R")
+            if self.fx_db_scale:
+                self.draw_scale_vertical(painter, x_scale, int(22 * self.size_scale))
+
+            if self.theme_id == 5:
+                painter.setPen(QColor(255, 255, 255, 45))
+                top_y = int(22 * self.size_scale)
+                end_y = top_y + int(self.num_leds * 13 * self.size_scale)
+                for x_col in (x_l, x_r):
+                    painter.drawLine(x_col + int(col_w * 0.25), top_y, x_col + int(col_w * 0.25), end_y)
+                    painter.drawLine(x_col + int(col_w * 0.75), top_y, x_col + int(col_w * 0.75), end_y)
+
+    def draw_scale_horizontal(self, painter, start_x, y):
+        if self.theme_id == 5:
+            painter.setPen(QColor(77, 174, 184, 200))
+        else:
+            painter.setPen(QColor(160, 160, 160, 180))
+        font = painter.font()
+        font.setBold(False)
+        font.setPointSizeF(max(6.0, 7.5 * self.size_scale))
+        painter.setFont(font)
+
+        marks = [
+            (0, "-∞"),
+            (int(self.num_leds * 0.35), "-20"),
+            (int(self.num_leds * 0.65), "-10"),
+            (int(self.num_leds * 0.85), "-6"),
+            (int(self.num_leds * 0.91), "-3"),
+            (self.num_leds - 1, "0")
+        ]
+        led_w = 11 * self.size_scale
+        gap = 2 * self.size_scale
+
+        for idx, label in marks:
+            x = int(start_x + idx * (led_w + gap) + led_w / 2)
+            painter.drawLine(x, y, x, y + int(3 * self.size_scale))
+            painter.drawText(x - int(8 * self.size_scale), y + int(10 * self.size_scale), label)
+
+    def draw_scale_vertical(self, painter, x, start_y):
+        if self.theme_id == 5:
+            painter.setPen(QColor(77, 174, 184, 200))
+        else:
+            painter.setPen(QColor(160, 160, 160, 180))
+        font = painter.font()
+        font.setBold(False)
+        font.setPointSizeF(max(6.0, 7.5 * self.size_scale))
+        painter.setFont(font)
+
+        marks = [
+            (self.num_leds - 1, " 0"),
+            (int(self.num_leds * 0.91), "-3"),
+            (int(self.num_leds * 0.85), "-6"),
+            (int(self.num_leds * 0.65), "-10"),
+            (int(self.num_leds * 0.35), "-20"),
+            (0, "-∞")
+        ]
+        led_h = 10 * self.size_scale
+        gap = 3 * self.size_scale
+
+        for idx_from_bottom, label in marks:
+            idx_from_top = self.num_leds - 1 - idx_from_bottom
+            y = int(start_y + idx_from_top * (led_h + gap) + led_h / 2)
+            painter.drawLine(x, y, x + int(4 * self.size_scale), y)
+            painter.drawText(x + int(6 * self.size_scale), y + int(4 * self.size_scale), label)
+
+    def draw_channel_horizontal(self, painter, level, peak, y_offset, label):
+        if self.theme_id == 5:
+            painter.setPen(QColor(102, 192, 204))
+        else:
+            painter.setPen(QColor(255, 255, 255))
         font = painter.font()
         font.setBold(True)
         font.setPointSizeF(font.pointSizeF() * self.size_scale)
@@ -360,14 +547,22 @@ class VuMeter(QWidget):
                     if is_on:
                         painter.setBrush(base_color)
                     else:
-                        painter.setBrush(dim_color)
+                        painter.setBrush(dim_color if self.fx_ghost else QColor(0, 0, 0, 0))
                         
                     painter.setPen(Qt.PenStyle.NoPen)
                     painter.drawRect(int(sub_x), int(y_offset), int(sub_w), int(led_h))
                     
-                    if is_on:
-                        # Inner glare
-                        painter.setBrush(QColor(255, 255, 255, 60))
+                    if is_on and self.fx_glow:
+                        glow_c = QColor(base_color)
+                        glow_c.setAlpha(int(40 + level * 60))
+                        painter.setBrush(glow_c)
+                        painter.drawRect(int(sub_x - 1), int(y_offset - 1), int(sub_w + 2), int(led_h + 2))
+                        painter.setBrush(base_color)
+                        painter.drawRect(int(sub_x), int(y_offset), int(sub_w), int(led_h))
+
+                    if is_on and self.fx_sheen:
+                        # Inner glare / gradient sheen
+                        painter.setBrush(QColor(255, 255, 255, 75))
                         painter.drawRect(int(sub_x + 1), int(y_offset + 1), int(sub_w - 2), int(led_h * 0.4))
 
                     if global_idx == peak_segment and peak_segment > 0:
@@ -417,12 +612,24 @@ class VuMeter(QWidget):
                     else: base_color = QColor(0, 255, 102)
                     
                 if i >= active_leds:
-                    painter.setBrush(QColor(base_color.red() // 8, base_color.green() // 8, base_color.blue() // 8))
+                    painter.setBrush(QColor(base_color.red() // 8, base_color.green() // 8, base_color.blue() // 8) if self.fx_ghost else QColor(0, 0, 0, 0))
                 else:
                     painter.setBrush(base_color)
                     
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
+
+                if i < active_leds:
+                    if self.fx_glow:
+                        glow_c = QColor(base_color)
+                        glow_c.setAlpha(int(30 + level * 50))
+                        painter.setBrush(glow_c)
+                        painter.drawRect(int(x - 1), int(y_offset - 1), int(led_w + 2), int(led_h + 2))
+                        painter.setBrush(base_color)
+                        painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
+                    if self.fx_sheen:
+                        painter.setBrush(QColor(255, 255, 255, 70))
+                        painter.drawRect(int(x + 1), int(y_offset + 1), int(led_w - 2), int(led_h * 0.4))
                 
                 if i == peak_led and peak_led > 0:
                     if self.peak_mode == 1:
@@ -440,6 +647,150 @@ class VuMeter(QWidget):
                         painter.setBrush(Qt.BrushStyle.NoBrush)
                         painter.setPen(QColor(255, 255, 255, 180))
                         painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
+
+    def draw_channel_vertical(self, painter, level, peak, x_offset, col_w, label):
+        if self.theme_id == 5:
+            painter.setPen(QColor(102, 192, 204))
+        else:
+            painter.setPen(QColor(255, 255, 255))
+        font = painter.font()
+        font.setBold(True)
+        font.setPointSizeF(font.pointSizeF() * self.size_scale)
+        painter.setFont(font)
+        painter.drawText(x_offset + int(col_w / 2 - 4 * self.size_scale), int(16 * self.size_scale), label)
+
+        led_w = col_w
+        led_h = 10 * self.size_scale
+        gap = 3 * self.size_scale
+        start_y = 22 * self.size_scale
+
+        if self.theme_id == 5:
+            total_segments = self.num_leds * 4
+            active_segments = int(level * total_segments)
+            peak_segment = int(peak * total_segments)
+
+            sub_gap = 2 * self.size_scale
+            sub_w = (led_w - 3 * sub_gap) / 4.0
+            base_color = QColor(0, 212, 232)
+            dim_color = QColor(0, 31, 38)
+
+            for idx_from_bottom in range(self.num_leds):
+                idx_from_top = self.num_leds - 1 - idx_from_bottom
+                y = start_y + idx_from_top * (led_h + gap)
+
+                for j in range(4):
+                    global_idx = idx_from_bottom * 4 + j
+                    is_on = global_idx < active_segments
+                    sub_x = x_offset + j * (sub_w + sub_gap)
+
+                    if is_on:
+                        painter.setBrush(base_color)
+                    else:
+                        painter.setBrush(dim_color if self.fx_ghost else QColor(0, 0, 0, 0))
+
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.drawRect(int(sub_x), int(y), int(sub_w), int(led_h))
+
+                    if is_on and self.fx_glow:
+                        glow_c = QColor(base_color)
+                        glow_c.setAlpha(int(40 + level * 60))
+                        painter.setBrush(glow_c)
+                        painter.drawRect(int(sub_x - 1), int(y - 1), int(sub_w + 2), int(led_h + 2))
+                        painter.setBrush(base_color)
+                        painter.drawRect(int(sub_x), int(y), int(sub_w), int(led_h))
+
+                    if is_on and self.fx_sheen:
+                        painter.setBrush(QColor(255, 255, 255, 75))
+                        painter.drawRect(int(sub_x + 1), int(y + 1), int(sub_w - 2), int(led_h * 0.4))
+
+                    if global_idx == peak_segment and peak_segment > 0:
+                        if self.peak_mode == 1 or self.peak_mode == 0:
+                            painter.setBrush(Qt.BrushStyle.NoBrush)
+                            painter.setPen(QColor(255, 255, 255))
+                            painter.drawRect(int(sub_x - 1), int(y - 1), int(sub_w + 1), int(led_h + 1))
+                        elif self.peak_mode == 2:
+                            painter.setBrush(Qt.BrushStyle.NoBrush)
+                            painter.setPen(QColor(255, 200, 0))
+                            painter.drawRect(int(sub_x - 1), int(y - 1), int(sub_w + 1), int(led_h + 1))
+                        elif self.peak_mode == 3:
+                            painter.setBrush(Qt.BrushStyle.NoBrush)
+                            painter.setPen(QColor(0, 230, 255))
+                            painter.drawRect(int(sub_x - 1), int(y - 1), int(sub_w + 1), int(led_h + 1))
+        else:
+            active_leds = int(level * self.num_leds)
+            peak_led = int(peak * self.num_leds)
+
+            red_start = int(self.num_leds * 0.8)
+            yellow_start = int(self.num_leds * 0.6)
+
+            for idx_from_bottom in range(self.num_leds):
+                idx_from_top = self.num_leds - 1 - idx_from_bottom
+                y = start_y + idx_from_top * (led_h + gap)
+
+                is_red = idx_from_bottom >= red_start
+                is_yellow = idx_from_bottom >= yellow_start and not is_red
+
+                if self.theme_id == 1:
+                    if is_red: base_color = QColor(255, 50, 200)
+                    elif is_yellow: base_color = QColor(100, 150, 255)
+                    else: base_color = QColor(0, 200, 255)
+                elif self.theme_id == 2:
+                    if is_red: base_color = QColor(255, 0, 50)
+                    elif is_yellow: base_color = QColor(255, 100, 0)
+                    else: base_color = QColor(255, 180, 0)
+                elif self.theme_id == 3: # Ice
+                    if is_red: base_color = QColor(255, 255, 255)
+                    elif is_yellow: base_color = QColor(136, 221, 255)
+                    else: base_color = QColor(0, 229, 255)
+                elif self.theme_id == 4: # Sunset
+                    if is_red: base_color = QColor(233, 30, 99)
+                    elif is_yellow: base_color = QColor(255, 107, 53)
+                    else: base_color = QColor(255, 193, 7)
+                else:
+                    if is_red: base_color = QColor(255, 50, 50)
+                    elif is_yellow: base_color = QColor(255, 200, 50)
+                    else: base_color = QColor(0, 255, 102)
+
+                if idx_from_bottom >= active_leds:
+                    painter.setBrush(QColor(base_color.red() // 8, base_color.green() // 8, base_color.blue() // 8) if self.fx_ghost else QColor(0, 0, 0, 0))
+                else:
+                    painter.setBrush(base_color)
+
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.drawRect(int(x_offset), int(y), int(led_w), int(led_h))
+
+                if idx_from_bottom < active_leds:
+                    if self.fx_glow:
+                        glow_c = QColor(base_color)
+                        glow_c.setAlpha(int(30 + level * 50))
+                        painter.setBrush(glow_c)
+                        painter.drawRect(int(x_offset - 1), int(y - 1), int(led_w + 2), int(led_h + 2))
+                        painter.setBrush(base_color)
+                        painter.drawRect(int(x_offset), int(y), int(led_w), int(led_h))
+                    if self.fx_sheen:
+                        painter.setBrush(QColor(255, 255, 255, 70))
+                        painter.drawRect(int(x_offset + 1), int(y + 1), int(led_w - 2), int(led_h * 0.4))
+
+                if idx_from_bottom == peak_led and peak_led > 0:
+                    if self.peak_mode == 1:
+                        painter.setBrush(base_color)
+                        painter.drawRect(int(x_offset), int(y), int(led_w), int(led_h))
+                    elif self.peak_mode == 2:
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(QColor(255, 200, 0))
+                        painter.drawRect(int(x_offset), int(y), int(led_w), int(led_h))
+                    elif self.peak_mode == 3:
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(QColor(0, 230, 255))
+                        painter.drawRect(int(x_offset), int(y), int(led_w), int(led_h))
+                    else:
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(QColor(255, 255, 255, 180))
+                        painter.drawRect(int(x_offset), int(y), int(led_w), int(led_h))
+
+    # Backward compatibility helper
+    def draw_channel(self, painter, level, peak, y_offset, label):
+        self.draw_channel_horizontal(painter, level, peak, y_offset, label)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
