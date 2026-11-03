@@ -15,6 +15,7 @@ import android.os.IBinder
 import android.view.Gravity
 import android.view.WindowManager
 import kotlin.concurrent.thread
+import kotlin.math.sqrt
 
 class FloatingVuService : Service() {
     private var windowManager: WindowManager? = null
@@ -23,11 +24,13 @@ class FloatingVuService : Service() {
     private var running = true
     @Volatile private var amplitudeCount = 32767.0
     @Volatile private var detectionMode = 0 // 0 = Peak, 1 = RMS
+    @Volatile private var rmsWindowMs = 350 // Default 350 ms (50 - 1000 ms)
 
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
         when (key) {
             "amplitude_count" -> amplitudeCount = prefs.getInt("amplitude_count", 32767).toDouble()
             "detection_mode" -> detectionMode = prefs.getInt("detection_mode", 0)
+            "rms_window_ms" -> rmsWindowMs = prefs.getInt("rms_window_ms", 350).coerceIn(50, 1000)
         }
     }
 
@@ -38,6 +41,7 @@ class FloatingVuService : Service() {
         val prefs = getSharedPreferences("StereoVuPrefs", Context.MODE_PRIVATE)
         amplitudeCount = prefs.getInt("amplitude_count", 32767).toDouble()
         detectionMode = prefs.getInt("detection_mode", 0)
+        rmsWindowMs = prefs.getInt("rms_window_ms", 350).coerceIn(50, 1000)
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
         
         startForegroundNotification()
@@ -50,10 +54,10 @@ class FloatingVuService : Service() {
         }
         val captureIntent = intent?.getParcelableExtra<Intent>("captureIntent")
         
-        // Frissítjük a beállításokat induláskor
         val prefs = getSharedPreferences("StereoVuPrefs", Context.MODE_PRIVATE)
         amplitudeCount = prefs.getInt("amplitude_count", 32767).toDouble()
         detectionMode = prefs.getInt("detection_mode", 0)
+        rmsWindowMs = prefs.getInt("rms_window_ms", 350).coerceIn(50, 1000)
         
         showOverlay()
         startAudioCapture(captureIntent)
@@ -115,6 +119,7 @@ class FloatingVuService : Service() {
         if (audioRecord != null) return
         thread {
             try {
+                val sampleRate = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && captureIntent != null) 48000 else 44100
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && captureIntent != null) {
                     val mgr = getSystemService(MediaProjectionManager::class.java)
                     val projection = mgr.getMediaProjection(-1, captureIntent)
@@ -124,7 +129,7 @@ class FloatingVuService : Service() {
                         .build()
                     val format = AudioFormat.Builder()
                         .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(48000)
+                        .setSampleRate(sampleRate)
                         .setChannelMask(AudioFormat.CHANNEL_IN_STEREO)
                         .build()
                     audioRecord = AudioRecord.Builder()
@@ -135,7 +140,7 @@ class FloatingVuService : Service() {
                 } else {
                     val format = AudioFormat.Builder()
                         .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                        .setSampleRate(44100)
+                        .setSampleRate(sampleRate)
                         .setChannelMask(AudioFormat.CHANNEL_IN_STEREO)
                         .build()
                     audioRecord = AudioRecord.Builder()
@@ -146,44 +151,108 @@ class FloatingVuService : Service() {
                 }
                 audioRecord?.startRecording()
                 val buffer = ShortArray(1024)
+
+                // Pre-allocate circular sample-squared buffer for up to 1000 ms (sampleRate frames)
+                // 1 frame = 1 stereo pair (1 left sample, 1 right sample)
+                val maxBufferFrames = sampleRate // 1 second at sampleRate frames
+                val ringSumSqL = DoubleArray(maxBufferFrames)
+                val ringSumSqR = DoubleArray(maxBufferFrames)
+                var ringHead = 0
+                var currentSamples = 0
+                var sumSqL = 0.0
+                var sumSqR = 0.0
+                var lastWindowMs = rmsWindowMs.coerceIn(50, 1000)
+                var windowFrames = (sampleRate * lastWindowMs) / 1000
+                var iterationCount = 0
+
+                fun recomputeSum() {
+                    var sL = 0.0
+                    var sR = 0.0
+                    val count = currentSamples
+                    val start = (ringHead - count + maxBufferFrames) % maxBufferFrames
+                    for (k in 0 until count) {
+                        val idx = (start + k) % maxBufferFrames
+                        sL += ringSumSqL[idx]
+                        sR += ringSumSqR[idx]
+                    }
+                    sumSqL = sL
+                    sumSqR = sR
+                }
+
                 while (running) {
                     val read = audioRecord?.read(buffer, 0, buffer.size) ?: 0
                     if (read > 0) {
                         val maxAmp = amplitudeCount
                         val isRms = (detectionMode == 1)
 
-                        var valL: Float
-                        var valR: Float
+                        // Peak detection: True peak of current audio buffer (max absolute sample)
+                        // Fast, responsive attack
+                        var peakMaxL = 0.0
+                        var peakMaxR = 0.0
 
+                        val reqWindowMs = rmsWindowMs.coerceIn(50, 1000)
+                        if (reqWindowMs != lastWindowMs) {
+                            lastWindowMs = reqWindowMs
+                            windowFrames = (sampleRate * lastWindowMs) / 1000
+                            if (currentSamples > windowFrames) {
+                                currentSamples = windowFrames
+                            }
+                            recomputeSum()
+                        }
+
+                        var i = 0
+                        while (i < read - 1) {
+                            val l = buffer[i].toDouble() / maxAmp
+                            val r = buffer[i + 1].toDouble() / maxAmp
+                            val absL = Math.abs(l)
+                            val absR = Math.abs(r)
+                            if (absL > peakMaxL) peakMaxL = absL
+                            if (absR > peakMaxR) peakMaxR = absR
+
+                            val sqL = l * l
+                            val sqR = r * r
+
+                            if (currentSamples < windowFrames) {
+                                ringSumSqL[ringHead] = sqL
+                                ringSumSqR[ringHead] = sqR
+                                sumSqL += sqL
+                                sumSqR += sqR
+                                currentSamples++
+                                ringHead = (ringHead + 1) % maxBufferFrames
+                            } else {
+                                // Overwrite oldest sample at ringHead (which is windowFrames ago)
+                                val oldestIdx = (ringHead - windowFrames + maxBufferFrames) % maxBufferFrames
+                                sumSqL -= ringSumSqL[oldestIdx]
+                                sumSqR -= ringSumSqR[oldestIdx]
+
+                                ringSumSqL[ringHead] = sqL
+                                ringSumSqR[ringHead] = sqR
+                                sumSqL += sqL
+                                sumSqR += sqR
+                                ringHead = (ringHead + 1) % maxBufferFrames
+                            }
+
+                            i += 2
+                        }
+
+                        // Periodic numerical drift correction
+                        iterationCount++
+                        if (iterationCount >= 100) {
+                            iterationCount = 0
+                            recomputeSum()
+                        }
+
+                        val valL: Float
+                        val valR: Float
                         if (isRms) {
-                            var sumL = 0.0
-                            var sumR = 0.0
-                            var count = 0
-                            var i = 0
-                            while (i < read - 1) {
-                                val l = buffer[i].toDouble() / maxAmp
-                                val r = buffer[i + 1].toDouble() / maxAmp
-                                sumL += l * l
-                                sumR += r * r
-                                count++
-                                i += 2
-                            }
-                            valL = if (count > 0) Math.sqrt(sumL / count).toFloat() else 0f
-                            valR = if (count > 0) Math.sqrt(sumR / count).toFloat() else 0f
+                            val count = currentSamples.coerceAtLeast(1)
+                            val rmsL = sqrt((sumSqL / count).coerceAtLeast(0.0)).toFloat()
+                            val rmsR = sqrt((sumSqR / count).coerceAtLeast(0.0)).toFloat()
+                            valL = rmsL
+                            valR = rmsR
                         } else {
-                            // Peak mód: a puffer legmagasabb abszolút csúcsértéke
-                            var maxL = 0.0
-                            var maxR = 0.0
-                            var i = 0
-                            while (i < read - 1) {
-                                val l = Math.abs(buffer[i].toDouble()) / maxAmp
-                                val r = Math.abs(buffer[i + 1].toDouble()) / maxAmp
-                                if (l > maxL) maxL = l
-                                if (r > maxR) maxR = r
-                                i += 2
-                            }
-                            valL = maxL.toFloat()
-                            valR = maxR.toFloat()
+                            valL = peakMaxL.toFloat()
+                            valR = peakMaxR.toFloat()
                         }
 
                         vuView?.post { vuView?.updateLevels(valL, valR) }

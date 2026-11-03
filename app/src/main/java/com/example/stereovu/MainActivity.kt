@@ -6,6 +6,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.graphics.Color
 import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
@@ -37,7 +38,7 @@ class MainActivity : Activity() {
 
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(48, 48, 48, 48)
+            setPadding(36, 40, 36, 40)
             gravity = Gravity.CENTER_HORIZONTAL
         }
 
@@ -48,7 +49,7 @@ class MainActivity : Activity() {
             textSize = 24f
             typeface = Typeface.DEFAULT_BOLD
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(0, 0, 0, 8)
+            setPadding(0, 0, 0, 6)
         }
         container.addView(titleText)
 
@@ -56,9 +57,9 @@ class MainActivity : Activity() {
         val subText = TextView(this).apply {
             text = "Szabd személyre a lebegő hangszintmérő működését és megjelenését valós időben!"
             setTextColor(Color.parseColor("#999999"))
-            textSize = 14f
+            textSize = 13f
             gravity = Gravity.CENTER_HORIZONTAL
-            setPadding(0, 0, 0, 32)
+            setPadding(0, 0, 0, 24)
         }
         container.addView(subText)
 
@@ -69,18 +70,63 @@ class MainActivity : Activity() {
             setMargins(0, 0, 0, 16)
         }
 
-        // 0. Detektálási mód (Detection mode: Peak / RMS)
+        // Helper a szekciók kártyás kialakításához
+        fun createSectionCard(title: String, subtitle: String): LinearLayout {
+            val card = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(32, 28, 32, 28)
+                val bg = GradientDrawable().apply {
+                    setColor(Color.parseColor("#1C1C1E"))
+                    cornerRadius = 24f
+                    setStroke(2, Color.parseColor("#2C2C2E"))
+                }
+                background = bg
+                layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    setMargins(0, 0, 0, 24)
+                }
+            }
+
+            val cardTitle = TextView(this).apply {
+                text = title
+                setTextColor(Color.parseColor("#00E5FF"))
+                textSize = 17f
+                typeface = Typeface.DEFAULT_BOLD
+                setPadding(0, 0, 0, 4)
+            }
+            card.addView(cardTitle)
+
+            if (subtitle.isNotEmpty()) {
+                val cardSubtitle = TextView(this).apply {
+                    text = subtitle
+                    setTextColor(Color.parseColor("#8E8E93"))
+                    textSize = 12f
+                    setPadding(0, 0, 0, 16)
+                }
+                card.addView(cardSubtitle)
+            }
+
+            return card
+        }
+
+        // =========================================================================
+        // Szekció 1: Detektálás és Ballisztika (Detection & Ballistics)
+        // =========================================================================
+        val sec1 = createSectionCard("1. Detektálás és Ballisztika", "Hangszint számítási mód, RMS ablak és fizikai viselkedés")
+
         val detLabel = TextView(this).apply {
             text = "Detektálási mód (Detection mode)"
             setTextColor(Color.parseColor("#E0E0E0"))
-            textSize = 15f
-            setPadding(0, 16, 0, 8)
+            textSize = 14f
+            setPadding(0, 4, 0, 6)
         }
-        container.addView(detLabel)
+        sec1.addView(detLabel)
 
         val detModes = arrayOf(
             "Peak (Élénk, közvetlen csúcsérték)",
-            "RMS (Effektív érték, zenei átlag)"
+            "RMS (Effektív érték, zenei ablak)"
         )
         val detSpinner = Spinner(this).apply {
             val adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, detModes).apply {
@@ -94,20 +140,32 @@ class MainActivity : Activity() {
                 }
                 override fun onNothingSelected(parent: AdapterView<*>?) {}
             }
-            setBackgroundColor(Color.parseColor("#252525"))
-            setPadding(24, 24, 24, 24)
+            setBackgroundColor(Color.parseColor("#2A2A2D"))
+            setPadding(20, 20, 20, 20)
             layoutParams = layoutParamsMatch
         }
-        container.addView(detSpinner)
+        sec1.addView(detSpinner)
 
-        // 0b. Üzemmód / Ballisztika
+        // RMS Window (ms) slider
+        addIntSlider(
+            sec1,
+            layoutParamsMatch,
+            labelPrefix = "RMS Időablak (RMS Window)",
+            minVal = 50,
+            maxVal = 1000,
+            defaultVal = 350,
+            prefKey = "rms_window_ms",
+            unit = "ms"
+        )
+
+        // Ballisztika mód
         val modeLabel = TextView(this).apply {
             text = "Kijelző Üzemmód (Ballisztika)"
             setTextColor(Color.parseColor("#E0E0E0"))
-            textSize = 15f
-            setPadding(0, 16, 0, 8)
+            textSize = 14f
+            setPadding(0, 8, 0, 6)
         }
-        container.addView(modeLabel)
+        sec1.addView(modeLabel)
 
         val modes = arrayOf(
             "Digitális Peak (Gyors, pontos)",
@@ -127,79 +185,27 @@ class MainActivity : Activity() {
                 }
                 override fun onNothingSelected(parent: AdapterView<*>?) {}
             }
-            setBackgroundColor(Color.parseColor("#252525"))
-            setPadding(24, 24, 24, 24)
+            setBackgroundColor(Color.parseColor("#2A2A2D"))
+            setPadding(20, 20, 20, 20)
             layoutParams = layoutParamsMatch
         }
-        container.addView(modeSpinner)
+        sec1.addView(modeSpinner)
 
-        // Target / Release rate (Célérték elengedési sebesség)
+        // Attack & Decay egyéni módhoz
         addSlider(
-            container,
+            sec1,
             layoutParamsMatch,
-            labelPrefix = "Célérték elengedés (Release rate)",
-            minVal = 0.88f,
-            maxVal = 0.97f,
-            defaultVal = 0.94f,
-            prefKey = "target_decay"
-        ) { v ->
-            java.lang.String.format(Locale.US, "%.3f", v)
-        }
-
-        // Peak Hold time (Peak tartási idő)
-        addLongSlider(
-            container,
-            layoutParamsMatch,
-            labelPrefix = "Peak tartási idő (Peak Hold)",
-            minVal = 200L,
-            maxVal = 3000L,
-            defaultVal = 900L,
-            prefKey = "peak_hold_ms",
-            unit = "ms"
-        )
-
-        // Peak decay rate (Peak elhalványulási sebesség)
-        addSlider(
-            container,
-            layoutParamsMatch,
-            labelPrefix = "Peak lecsengés (Peak decay)",
-            minVal = 0.900f,
-            maxVal = 0.995f,
-            defaultVal = 0.985f,
-            prefKey = "peak_decay"
-        ) { v ->
-            java.lang.String.format(Locale.US, "%.3f", v)
-        }
-
-        // Analóg rugó (Analog Spring)
-        addSlider(
-            container,
-            layoutParamsMatch,
-            labelPrefix = "Analóg Rugó (Spring)",
+            labelPrefix = "Egyéni Felfutás (Attack)",
             minVal = 0.05f,
-            maxVal = 0.40f,
-            defaultVal = 0.15f,
-            prefKey = "analog_spring"
+            maxVal = 1.00f,
+            defaultVal = 0.35f,
+            prefKey = "attack"
         ) { v ->
-            java.lang.String.format(Locale.US, "%.2f", v)
+            "${(v * 100).toInt()}%"
         }
 
-        // Analóg csillapítás (Analog Damp)
         addSlider(
-            container,
-            layoutParamsMatch,
-            labelPrefix = "Analóg Csillapítás (Damp)",
-            minVal = 0.10f,
-            maxVal = 0.40f,
-            defaultVal = 0.25f,
-            prefKey = "analog_damp"
-        ) { v ->
-            java.lang.String.format(Locale.US, "%.2f", v)
-        }
-
-        // 1. Lecsengési tehetetlenség (Decay) - Egyéni módhoz
-        addSlider(
-            container,
+            sec1,
             layoutParamsMatch,
             labelPrefix = "Egyéni Lecsengés (Decay)",
             minVal = 0.70f,
@@ -215,171 +221,184 @@ class MainActivity : Activity() {
             }
         }
 
-        // 1b. Felfutás (Attack) - Egyéni módhoz
+        // Célérték elengedés
         addSlider(
-            container,
+            sec1,
             layoutParamsMatch,
-            labelPrefix = "Egyéni Felfutás (Attack)",
-            minVal = 0.05f,
-            maxVal = 1.00f,
-            defaultVal = 0.35f,
-            prefKey = "attack"
+            labelPrefix = "Célérték elengedés (Release rate)",
+            minVal = 0.88f,
+            maxVal = 0.97f,
+            defaultVal = 0.94f,
+            prefKey = "target_decay"
         ) { v ->
-            "${(v * 100).toInt()}%"
+            java.lang.String.format(Locale.US, "%.3f", v)
         }
 
-        // 1c. LED-ek száma
-        addIntSlider(
-            container,
+        // Peak Hold time
+        addLongSlider(
+            sec1,
             layoutParamsMatch,
-            labelPrefix = "LED-ek száma",
-            minVal = 10,
-            maxVal = 40,
-            defaultVal = 20,
-            prefKey = "led_count"
+            labelPrefix = "Peak tartási idő (Peak Hold)",
+            minVal = 200L,
+            maxVal = 3000L,
+            defaultVal = 900L,
+            prefKey = "peak_hold_ms",
+            unit = "ms"
         )
 
-        // 1d. Amplitude Count (Referencia szint)
-        addIntSlider(
-            container,
+        // Peak decay rate
+        addSlider(
+            sec1,
             layoutParamsMatch,
-            labelPrefix = "Amplitude Count (Max jelszint)",
-            minVal = 2000,
-            maxVal = 32767,
-            defaultVal = 32767,
-            prefKey = "amplitude_count"
-        )
+            labelPrefix = "Peak lecsengés (Peak decay)",
+            minVal = 0.900f,
+            maxVal = 0.995f,
+            defaultVal = 0.985f,
+            prefKey = "peak_decay"
+        ) { v ->
+            java.lang.String.format(Locale.US, "%.3f", v)
+        }
 
-        // 1e. Szigorú Aluláteresztő Szűrő (LPF)
+        // Analóg rugó & csillapítás
+        addSlider(
+            sec1,
+            layoutParamsMatch,
+            labelPrefix = "Analóg Rugó (Spring)",
+            minVal = 0.05f,
+            maxVal = 0.40f,
+            defaultVal = 0.15f,
+            prefKey = "analog_spring"
+        ) { v ->
+            java.lang.String.format(Locale.US, "%.2f", v)
+        }
+
+        addSlider(
+            sec1,
+            layoutParamsMatch,
+            labelPrefix = "Analóg Csillapítás (Damp)",
+            minVal = 0.10f,
+            maxVal = 0.40f,
+            defaultVal = 0.25f,
+            prefKey = "analog_damp"
+        ) { v ->
+            java.lang.String.format(Locale.US, "%.2f", v)
+        }
+
         val lpfCheckbox = CheckBox(this).apply {
             text = "Szigorú Digitális Aluláteresztő Szűrő (LPF)"
             setTextColor(Color.parseColor("#E0E0E0"))
-            textSize = 15f
+            textSize = 14f
             isChecked = prefs.getBoolean("use_lpf", false)
             setOnCheckedChangeListener { _, isChecked ->
                 prefs.edit().putBoolean("use_lpf", isChecked).apply()
             }
             layoutParams = layoutParamsMatch
         }
-        container.addView(lpfCheckbox)
+        sec1.addView(lpfCheckbox)
 
-        // --- Visual Effects (Látvány effektusok) ---
-        val fxHeading = TextView(this).apply {
-            text = "Látvány effektusok (Visual Effects)"
-            setTextColor(Color.WHITE)
-            textSize = 17f
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, 24, 0, 8)
-        }
-        container.addView(fxHeading)
+        container.addView(sec1)
+
+        // =========================================================================
+        // Szekció 2: Látvány effektusok (Visual Effects)
+        // =========================================================================
+        val sec2 = createSectionCard("2. Látvány effektusok", "Ragyogás, csillanás, ghost LED-ek és skálajelzések")
 
         val glowCheckbox = CheckBox(this).apply {
             text = "LED Ragyogás (Glow effektek)"
             setTextColor(Color.parseColor("#E0E0E0"))
-            textSize = 15f
+            textSize = 14f
             isChecked = prefs.getBoolean("fx_glow", true)
             setOnCheckedChangeListener { _, isChecked ->
                 prefs.edit().putBoolean("fx_glow", isChecked).apply()
             }
             layoutParams = layoutParamsMatch
         }
-        container.addView(glowCheckbox)
+        sec2.addView(glowCheckbox)
 
         val sheenCheckbox = CheckBox(this).apply {
             text = "Belső Fény / Csillanás (Sheen highlight)"
             setTextColor(Color.parseColor("#E0E0E0"))
-            textSize = 15f
+            textSize = 14f
             isChecked = prefs.getBoolean("fx_sheen", true)
             setOnCheckedChangeListener { _, isChecked ->
                 prefs.edit().putBoolean("fx_sheen", isChecked).apply()
             }
             layoutParams = layoutParamsMatch
         }
-        container.addView(sheenCheckbox)
+        sec2.addView(sheenCheckbox)
 
         val ghostCheckbox = CheckBox(this).apply {
             text = "Halvány inaktív LED-ek (Ghost LEDs)"
             setTextColor(Color.parseColor("#E0E0E0"))
-            textSize = 15f
+            textSize = 14f
             isChecked = prefs.getBoolean("fx_ghost", true)
             setOnCheckedChangeListener { _, isChecked ->
                 prefs.edit().putBoolean("fx_ghost", isChecked).apply()
             }
             layoutParams = layoutParamsMatch
         }
-        container.addView(ghostCheckbox)
+        sec2.addView(ghostCheckbox)
 
         val dbScaleCheckbox = CheckBox(this).apply {
             text = "dB Skála feliratok megjelenítése"
             setTextColor(Color.parseColor("#E0E0E0"))
-            textSize = 15f
+            textSize = 14f
             isChecked = prefs.getBoolean("fx_db_scale", true)
             setOnCheckedChangeListener { _, isChecked ->
                 prefs.edit().putBoolean("fx_db_scale", isChecked).apply()
             }
             layoutParams = layoutParamsMatch
         }
-        container.addView(dbScaleCheckbox)
+        sec2.addView(dbScaleCheckbox)
 
-        // 2. Érzékenység (Gain)
-        addSlider(
-            container,
-            layoutParamsMatch,
-            labelPrefix = "Érzékenység / Erősítés",
-            minVal = 0.01f,
-            maxVal = 3.0f,
-            defaultVal = 1.0f,
-            prefKey = "gain"
-        ) { v ->
-            java.lang.String.format(Locale.US, "%.2fx", v)
-        }
+        container.addView(sec2)
 
-        // 3. Kijelző mérete (Size)
-        addSlider(
-            container,
-            layoutParamsMatch,
-            labelPrefix = "Kijelző mérete",
-            minVal = 0.6f,
-            maxVal = 1.8f,
-            defaultVal = 1.0f,
-            prefKey = "size_scale"
-        ) { v ->
-            "${(v * 100).toInt()}%"
-        }
+        // =========================================================================
+        // Szekció 3: Megjelenés és Elrendezés (Appearance & Layout)
+        // =========================================================================
+        val sec3 = createSectionCard("3. Megjelenés és Elrendezés", "Témák, LED darabszám, tájolás, méret és átlátszóság")
 
-        // 4. Háttér átlátszósága (Opacity)
-        val currentOpacity = prefs.getInt("opacity", 204)
-        val opacityLabel = TextView(this).apply {
-            text = "Háttér sötétsége: ${(currentOpacity.toFloat() / 255f * 100).toInt()}%"
+        val themeLabel = TextView(this).apply {
+            text = "Színséma kiválasztása"
             setTextColor(Color.parseColor("#E0E0E0"))
-            textSize = 15f
-            setPadding(0, 16, 0, 8)
+            textSize = 14f
+            setPadding(0, 4, 0, 6)
         }
-        container.addView(opacityLabel)
+        sec3.addView(themeLabel)
 
-        val opacitySeekBar = SeekBar(this).apply {
-            max = 255
-            progress = currentOpacity
-            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
-                    prefs.edit().putInt("opacity", progress).apply()
-                    opacityLabel.text = "Háttér sötétsége: ${(progress.toFloat() / 255f * 100).toInt()}%"
+        val themes = arrayOf(
+            "Klasszikus (Zöld-Narancs-Piros)",
+            "Cyberpunk (Neon Kék-Rózsaszín)",
+            "Tűz (Sárga-Narancs-Vörös)",
+            "Jég (Türkiz-Kék-Fehér)",
+            "Naplemente (Arany-Bíbor)",
+            "VFD (Klasszikus Cián)"
+        )
+        val themeSpinner = Spinner(this).apply {
+            val adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, themes).apply {
+                setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
+            }
+            this.adapter = adapter
+            setSelection(prefs.getInt("theme", 0))
+            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
+                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
+                    prefs.edit().putInt("theme", position).apply()
                 }
-                override fun onStartTrackingTouch(sb: SeekBar?) {}
-                override fun onStopTrackingTouch(sb: SeekBar?) {}
-            })
+                override fun onNothingSelected(parent: AdapterView<*>?) {}
+            }
+            setBackgroundColor(Color.parseColor("#2A2A2D"))
+            setPadding(20, 20, 20, 20)
             layoutParams = layoutParamsMatch
         }
-        container.addView(opacitySeekBar)
+        sec3.addView(themeSpinner)
 
-        // 5. Színséma (Color Theme)
         val orientLabel = TextView(this).apply {
-            text = "Kijelző Iránya"
+            text = "Kijelző Iránya (Elrendezés)"
             setTextColor(Color.parseColor("#E0E0E0"))
-            textSize = 15f
-            setPadding(0, 16, 0, 8)
+            textSize = 14f
+            setPadding(0, 8, 0, 6)
         }
-        container.addView(orientLabel)
+        sec3.addView(orientLabel)
 
         val orients = arrayOf("Függőleges (Vertical)", "Vízszintes (Horizontal)")
         val orientSpinner = Spinner(this).apply {
@@ -394,54 +413,65 @@ class MainActivity : Activity() {
                 }
                 override fun onNothingSelected(parent: AdapterView<*>?) {}
             }
-            setBackgroundColor(Color.parseColor("#252525"))
-            setPadding(24, 24, 24, 24)
+            setBackgroundColor(Color.parseColor("#2A2A2D"))
+            setPadding(20, 20, 20, 20)
             layoutParams = layoutParamsMatch
         }
-        container.addView(orientSpinner)
+        sec3.addView(orientSpinner)
 
-        val themeLabel = TextView(this).apply {
-            text = "Színséma kiválasztása"
-            setTextColor(Color.parseColor("#E0E0E0"))
-            textSize = 15f
-            setPadding(0, 16, 0, 8)
-        }
-        container.addView(themeLabel)
-
-        val themes = arrayOf(
-            "Klasszikus (Zöld-Narancs-Piros)",
-            "Cyberpunk (Neon Kék-Rózsaszín)",
-            "Tűz (Sárga-Narancs-Vörös)",
-            "Jég (Türkiz-Kék-Fehér)",
-            "Naplemente (Arany-Bíbor)",
-            "VFD (Klasszikus Cián)"
+        addIntSlider(
+            sec3,
+            layoutParamsMatch,
+            labelPrefix = "LED-ek száma",
+            minVal = 10,
+            maxVal = 40,
+            defaultVal = 20,
+            prefKey = "led_count"
         )
-        val spinner = Spinner(this).apply {
-            val adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, themes).apply {
-                setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-            }
-            this.adapter = adapter
-            setSelection(prefs.getInt("theme", 0))
-            onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
-                    prefs.edit().putInt("theme", position).apply()
+
+        addSlider(
+            sec3,
+            layoutParamsMatch,
+            labelPrefix = "Kijelző mérete",
+            minVal = 0.6f,
+            maxVal = 1.8f,
+            defaultVal = 1.0f,
+            prefKey = "size_scale"
+        ) { v ->
+            "${(v * 100).toInt()}%"
+        }
+
+        val currentOpacity = prefs.getInt("opacity", 204)
+        val opacityLabel = TextView(this).apply {
+            text = "Háttér sötétsége: ${(currentOpacity.toFloat() / 255f * 100).toInt()}%"
+            setTextColor(Color.parseColor("#E0E0E0"))
+            textSize = 14f
+            setPadding(0, 10, 0, 6)
+        }
+        sec3.addView(opacityLabel)
+
+        val opacitySeekBar = SeekBar(this).apply {
+            max = 255
+            progress = currentOpacity
+            setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+                override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
+                    prefs.edit().putInt("opacity", progress).apply()
+                    opacityLabel.text = "Háttér sötétsége: ${(progress.toFloat() / 255f * 100).toInt()}%"
                 }
-                override fun onNothingSelected(parent: AdapterView<*>?) {}
-            }
-            setBackgroundColor(Color.parseColor("#252525"))
-            setPadding(24, 24, 24, 24)
+                override fun onStartTrackingTouch(sb: SeekBar?) {}
+                override fun onStopTrackingTouch(sb: SeekBar?) {}
+            })
             layoutParams = layoutParamsMatch
         }
-        container.addView(spinner)
+        sec3.addView(opacitySeekBar)
 
-        // 6. Peak LED színe - JAVÍTOTT 4 opció
         val peakLabel = TextView(this).apply {
-            text = "Peak LED színe"
+            text = "Peak LED stílusa / színe"
             setTextColor(Color.parseColor("#E0E0E0"))
-            textSize = 15f
-            setPadding(0, 32, 0, 8)
+            textSize = 14f
+            setPadding(0, 12, 0, 6)
         }
-        container.addView(peakLabel)
+        sec3.addView(peakLabel)
 
         val peakOptions = arrayOf(
             "Fehér (klasszikus)",
@@ -454,7 +484,6 @@ class MainActivity : Activity() {
                 setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
             }
             this.adapter = adapter
-            // backward compat: régi bool -> új int
             val oldMode = if (prefs.contains("peak_mode")) prefs.getInt("peak_mode", 0)
                           else if (prefs.getBoolean("colored_peak", false)) 1 else 0
             setSelection(oldMode)
@@ -464,24 +493,49 @@ class MainActivity : Activity() {
                 }
                 override fun onNothingSelected(parent: AdapterView<*>?) {}
             }
-            setBackgroundColor(Color.parseColor("#252525"))
-            setPadding(24, 24, 24, 24)
+            setBackgroundColor(Color.parseColor("#2A2A2D"))
+            setPadding(20, 20, 20, 20)
             layoutParams = layoutParamsMatch
         }
-        container.addView(peakSpinner)
+        sec3.addView(peakSpinner)
 
-        // Elválasztó tér
-        val spacer = View(this).apply {
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 32)
+        container.addView(sec3)
+
+        // =========================================================================
+        // Szekció 4: Általános és Audió (General / Audio)
+        // =========================================================================
+        val sec4 = createSectionCard("4. Általános és Audió", "Érzékenység és jelszint beállítások")
+
+        addSlider(
+            sec4,
+            layoutParamsMatch,
+            labelPrefix = "Érzékenység / Erősítés (Gain)",
+            minVal = 0.01f,
+            maxVal = 3.0f,
+            defaultVal = 1.0f,
+            prefKey = "gain"
+        ) { v ->
+            java.lang.String.format(Locale.US, "%.2fx", v)
         }
-        container.addView(spacer)
 
-        // Gombok layout paraméterei (teljes szélesség)
+        addIntSlider(
+            sec4,
+            layoutParamsMatch,
+            labelPrefix = "Amplitude Count (Referencia jelszint)",
+            minVal = 2000,
+            maxVal = 32767,
+            defaultVal = 32767,
+            prefKey = "amplitude_count"
+        )
+
+        container.addView(sec4)
+
+        // Gombok layout paraméterei
         val buttonParams = LinearLayout.LayoutParams(
             ViewGroup.LayoutParams.MATCH_PARENT,
             ViewGroup.LayoutParams.WRAP_CONTENT
         ).apply {
-            setMargins(0, 16, 0, 16)
+            setMargins(0, 12, 0, 12)
         }
 
         // Indítás gomb
@@ -489,7 +543,7 @@ class MainActivity : Activity() {
             text = "Stereo VU indítása"
             textSize = 16f
             setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#00C853")) // Anyag zöld
+            setBackgroundColor(Color.parseColor("#00C853"))
             setPadding(32, 24, 32, 24)
             setOnClickListener { checkPermissions() }
             layoutParams = buttonParams
@@ -501,7 +555,7 @@ class MainActivity : Activity() {
             text = "Lebegő ablak leállítása"
             textSize = 16f
             setTextColor(Color.WHITE)
-            setBackgroundColor(Color.parseColor("#D50000")) // Anyag piros
+            setBackgroundColor(Color.parseColor("#D50000"))
             setPadding(32, 24, 32, 24)
             setOnClickListener {
                 stopService(Intent(this@MainActivity, FloatingVuService::class.java))
@@ -530,8 +584,8 @@ class MainActivity : Activity() {
         val label = TextView(this).apply {
             text = "$labelPrefix: ${valueFormatter(currentVal)}"
             setTextColor(Color.parseColor("#E0E0E0"))
-            textSize = 15f
-            setPadding(0, 16, 0, 8)
+            textSize = 14f
+            setPadding(0, 10, 0, 6)
         }
         container.addView(label)
 
@@ -566,8 +620,8 @@ class MainActivity : Activity() {
         val label = TextView(this).apply {
             text = "$labelPrefix: $currentVal $unit"
             setTextColor(Color.parseColor("#E0E0E0"))
-            textSize = 15f
-            setPadding(0, 16, 0, 8)
+            textSize = 14f
+            setPadding(0, 10, 0, 6)
         }
         container.addView(label)
         val seekBar = SeekBar(this).apply {
@@ -594,14 +648,15 @@ class MainActivity : Activity() {
         minVal: Int,
         maxVal: Int,
         defaultVal: Int,
-        prefKey: String
+        prefKey: String,
+        unit: String = ""
     ) {
         val currentVal = prefs.getInt(prefKey, defaultVal)
         val label = TextView(this).apply {
-            text = "$labelPrefix: $currentVal"
+            text = if (unit.isNotEmpty()) "$labelPrefix: $currentVal $unit" else "$labelPrefix: $currentVal"
             setTextColor(Color.parseColor("#E0E0E0"))
-            textSize = 15f
-            setPadding(0, 16, 0, 8)
+            textSize = 14f
+            setPadding(0, 10, 0, 6)
         }
         container.addView(label)
         val seekBar = SeekBar(this).apply {
@@ -611,7 +666,7 @@ class MainActivity : Activity() {
                 override fun onProgressChanged(sb: SeekBar?, progress: Int, fromUser: Boolean) {
                     val v = minVal + progress
                     prefs.edit().putInt(prefKey, v).apply()
-                    label.text = "$labelPrefix: $v"
+                    label.text = if (unit.isNotEmpty()) "$labelPrefix: $v $unit" else "$labelPrefix: $v"
                 }
                 override fun onStartTrackingTouch(sb: SeekBar?) {}
                 override fun onStopTrackingTouch(sb: SeekBar?) {}
