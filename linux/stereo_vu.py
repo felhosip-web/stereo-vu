@@ -4,7 +4,8 @@ import numpy as np
 import sounddevice as sd
 from PyQt6.QtWidgets import (QApplication, QWidget, QMenu, QDialog, 
                              QFormLayout, QSlider, QComboBox, QCheckBox, 
-                             QPushButton, QHBoxLayout, QLabel)
+                             QPushButton, QHBoxLayout, QVBoxLayout, QLabel,
+                             QTabWidget)
 from PyQt6.QtCore import Qt, QTimer, QPoint, QSettings
 from PyQt6.QtGui import QPainter, QColor, QAction
 
@@ -13,13 +14,152 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("Stereo VU Beállítások")
         self.settings = QSettings("StereoVU", "LinuxApp")
+        self.resize(480, 520)
         
-        layout = QFormLayout(self)
+        main_layout = QVBoxLayout(self)
+        self.tabs = QTabWidget(self)
+
+        # -------------------------------------------------------------
+        # Tab 1: Detektálás és Ballisztika (Detection & Ballistics)
+        # -------------------------------------------------------------
+        tab1 = QWidget()
+        layout1 = QFormLayout(tab1)
+
+        self.detection_combo = QComboBox()
+        self.detection_combo.addItems(["Peak (Csúcsérték)", "RMS (Négyzetes középérték)"])
+        self.detection_combo.setCurrentIndex(self.settings.value("detection_mode", 0, type=int))
+        layout1.addRow("Detektálási mód:", self.detection_combo)
+
+        self.rms_window_slider = QSlider(Qt.Orientation.Horizontal)
+        self.rms_window_slider.setRange(50, 1000)
+        self.rms_window_slider.setSingleStep(10)
+        self.rms_window_slider.setValue(self.settings.value("rms_window_ms", 350, type=int))
+        self.rms_window_label = QLabel(f"{self.rms_window_slider.value()} ms")
+        self.rms_window_slider.valueChanged.connect(lambda v: self.rms_window_label.setText(f"{v} ms"))
+        rms_box = QHBoxLayout()
+        rms_box.addWidget(self.rms_window_slider)
+        rms_box.addWidget(self.rms_window_label)
+        layout1.addRow("RMS ablak (50-1000 ms):", rms_box)
+
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItems(["Digitális Peak", "Analóg VU", "PPM", "Egyéni"])
+        self.mode_combo.setCurrentIndex(self.settings.value("mode", 0, type=int))
+        layout1.addRow("Üzemmód (Ballisztika):", self.mode_combo)
+
+        self.attack_slider = QSlider(Qt.Orientation.Horizontal)
+        self.attack_slider.setRange(5, 100)
+        self.attack_slider.setValue(int(self.settings.value("attack_speed", 0.35, type=float) * 100))
+        layout1.addRow("Egyéni Felfutás (5-100%):", self.attack_slider)
         
+        self.decay_slider = QSlider(Qt.Orientation.Horizontal)
+        self.decay_slider.setRange(5, 100)
+        self.decay_slider.setValue(int(self.settings.value("decay_speed", 0.12, type=float) * 100))
+        layout1.addRow("Egyéni Lecsengés (5-100%):", self.decay_slider)
+
+        self.target_decay_slider = QSlider(Qt.Orientation.Horizontal)
+        self.target_decay_slider.setRange(880, 970)
+        self.target_decay_slider.setValue(int(self.settings.value("target_decay", 0.94, type=float) * 1000))
+        layout1.addRow("Célérték elengedés (0.88-0.97):", self.target_decay_slider)
+
+        self.peak_hold_slider = QSlider(Qt.Orientation.Horizontal)
+        self.peak_hold_slider.setRange(200, 3000)
+        saved_peak_hold = self.settings.value("peak_hold_ms", self.settings.value("peak_hold", 900, type=int), type=int)
+        if saved_peak_hold <= 180:
+            saved_peak_hold = int(saved_peak_hold * 16.6)
+        self.peak_hold_slider.setValue(saved_peak_hold)
+        layout1.addRow("Peak tartási idő (200-3000 ms):", self.peak_hold_slider)
+
+        self.peak_decay_slider = QSlider(Qt.Orientation.Horizontal)
+        self.peak_decay_slider.setRange(900, 995)
+        self.peak_decay_slider.setValue(int(self.settings.value("peak_decay", 0.985, type=float) * 1000))
+        layout1.addRow("Peak lecsengés (0.900-0.995):", self.peak_decay_slider)
+
+        self.spring_slider = QSlider(Qt.Orientation.Horizontal)
+        self.spring_slider.setRange(5, 40)
+        self.spring_slider.setValue(int(self.settings.value("analog_spring", 0.15, type=float) * 100))
+        layout1.addRow("Analóg Rugó (0.05-0.40):", self.spring_slider)
+
+        self.damp_slider = QSlider(Qt.Orientation.Horizontal)
+        self.damp_slider.setRange(10, 40)
+        self.damp_slider.setValue(int(self.settings.value("analog_damp", 0.25, type=float) * 100))
+        layout1.addRow("Analóg Csillapítás (0.10-0.40):", self.damp_slider)
+
+        self.tabs.addTab(tab1, "Detektálás & Ballisztika")
+
+        # -------------------------------------------------------------
+        # Tab 2: Látvány effektusok (Visual Effects)
+        # -------------------------------------------------------------
+        tab2 = QWidget()
+        layout2 = QFormLayout(tab2)
+
+        self.fx_glow_check = QCheckBox("Bekapcsolva")
+        self.fx_glow_check.setChecked(self.settings.value("fx_glow", True, type=bool))
+        layout2.addRow("LED Ragyogás (Glow):", self.fx_glow_check)
+
+        self.fx_sheen_check = QCheckBox("Bekapcsolva")
+        self.fx_sheen_check.setChecked(self.settings.value("fx_sheen", True, type=bool))
+        layout2.addRow("Belső Fény / Csillanás (Sheen):", self.fx_sheen_check)
+
+        self.fx_ghost_check = QCheckBox("Bekapcsolva")
+        self.fx_ghost_check.setChecked(self.settings.value("fx_ghost", True, type=bool))
+        layout2.addRow("Halvány inaktív LED-ek (Ghost):", self.fx_ghost_check)
+
+        self.fx_db_scale_check = QCheckBox("Bekapcsolva")
+        self.fx_db_scale_check.setChecked(self.settings.value("fx_db_scale", True, type=bool))
+        layout2.addRow("dB Skála feliratok:", self.fx_db_scale_check)
+
+        self.tabs.addTab(tab2, "Látvány effektek")
+
+        # -------------------------------------------------------------
+        # Tab 3: Megjelenés és Elrendezés (Appearance & Layout)
+        # -------------------------------------------------------------
+        tab3 = QWidget()
+        layout3 = QFormLayout(tab3)
+
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItems(["Klasszikus (Zöld-Narancs-Piros)", "Cyberpunk (Neon Kék-Rózsaszín)", "Tűz (Sárga-Narancs-Vörös)", "Jég (Türkiz-Kék-Fehér)", "Naplemente (Arany-Bíbor)", "VFD (Klasszikus Cián)"])
+        self.theme_combo.setCurrentIndex(self.settings.value("theme", 0, type=int))
+        layout3.addRow("Színséma:", self.theme_combo)
+
+        self.layout_check = QCheckBox("Vízszintes (L fent, R lent)")
+        self.layout_check.setChecked(self.settings.value("horizontal", False, type=bool))
+        layout3.addRow("Elrendezés:", self.layout_check)
+
+        self.led_slider = QSlider(Qt.Orientation.Horizontal)
+        self.led_slider.setRange(10, 40)
+        self.led_slider.setValue(self.settings.value("led_count", 20, type=int))
+        layout3.addRow("LED-ek száma (10-40):", self.led_slider)
+
+        self.scale_slider = QSlider(Qt.Orientation.Horizontal)
+        self.scale_slider.setRange(50, 200)
+        self.scale_slider.setValue(int(self.settings.value("size_scale", 1.0, type=float) * 100))
+        layout3.addRow("Méret skálázás (50-200%):", self.scale_slider)
+        
+        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.opacity_slider.setRange(0, 255)
+        self.opacity_slider.setValue(self.settings.value("opacity", 204, type=int))
+        layout3.addRow("Háttér sötétsége:", self.opacity_slider)
+
+        self.peak_combo = QComboBox()
+        self.peak_combo.addItems(["Fehér (klasszikus)", "Színes (LED)", "Fix sárga", "Fix cián"])
+        if self.settings.contains("peak_mode"):
+            self.peak_combo.setCurrentIndex(self.settings.value("peak_mode", 0, type=int))
+        else:
+            old_colored = self.settings.value("colored_peak", False, type=bool)
+            self.peak_combo.setCurrentIndex(1 if old_colored else 0)
+        layout3.addRow("Peak LED stílusa:", self.peak_combo)
+
+        self.tabs.addTab(tab3, "Megjelenés & Elrendezés")
+
+        # -------------------------------------------------------------
+        # Tab 4: Általános és Audió (General / Audio)
+        # -------------------------------------------------------------
+        tab4 = QWidget()
+        layout4 = QFormLayout(tab4)
+
         self.device_combo = QComboBox()
         self.input_devices = []
         try:
-            import sounddevice as sd
             devices = sd.query_devices()
             default_device_idx = sd.default.device[0]
             default_device_name = devices[default_device_idx]['name'] if default_device_idx is not None and default_device_idx >= 0 else None
@@ -32,19 +172,16 @@ class SettingsDialog(QDialog):
                     self.input_devices.append(dev)
                     hostapi_name = hostapis[dev['hostapi']]['name']
                     name = f"{dev['name']} [{hostapi_name}]"
-                    # Add item with visible text (name + API) and hidden data (raw name)
                     self.device_combo.addItem(name, dev['name'])
 
-            # Try to select the saved device, or fallback to default
             idx = -1
             if current_device_name:
-                # Search by the hidden raw device name
                 for j in range(self.device_combo.count()):
                     if self.device_combo.itemData(j) == current_device_name:
                         idx = j
                         break
 
-            if idx < 0 and default_device_name: # If not found, use default
+            if idx < 0 and default_device_name:
                 for j in range(self.device_combo.count()):
                     if self.device_combo.itemData(j) == default_device_name:
                         idx = j
@@ -57,122 +194,22 @@ class SettingsDialog(QDialog):
             print(f"Error querying audio devices: {e}")
             self.device_combo.addItem("Alapértelmezett", -1)
 
-        layout.addRow("Bemeneti eszköz:", self.device_combo)
+        layout4.addRow("Bemeneti eszköz:", self.device_combo)
 
         hint_label = QLabel("Tipp: A rendszerhangok (kimenet) méréséhez hagyd\nAlapértelmezetten, majd a Hangerőszabályzóban\n(pavucontrol) a Felvétel fülön állítsd át a forrást\n'Monitor of...' eszközre.")
         hint_label.setStyleSheet("color: gray; font-size: 10px;")
-        layout.addRow("", hint_label)
+        layout4.addRow("", hint_label)
 
-        self.detection_combo = QComboBox()
-        self.detection_combo.addItems(["Peak (Csúcsérték)", "RMS (Négyzetes középérték)"])
-        self.detection_combo.setCurrentIndex(self.settings.value("detection_mode", 0, type=int))
-        layout.addRow("Detektálási mód:", self.detection_combo)
-
-        self.layout_check = QCheckBox("Vízszintes elrendezés (L fent, R lent)")
-        self.layout_check.setChecked(self.settings.value("horizontal", False, type=bool))
-        layout.addRow("Elrendezés:", self.layout_check)
-
-        self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["Digitális Peak", "Analóg VU", "PPM", "Egyéni"])
-        self.mode_combo.setCurrentIndex(self.settings.value("mode", 0, type=int))
-        layout.addRow("Üzemmód (Ballisztika):", self.mode_combo)
-
-        self.led_slider = QSlider(Qt.Orientation.Horizontal)
-        self.led_slider.setRange(10, 40)
-        self.led_slider.setValue(self.settings.value("led_count", 20, type=int))
-        layout.addRow("LED-ek száma (10-40):", self.led_slider)
-        
-        self.theme_combo = QComboBox()
-        self.theme_combo.addItems(["Klasszikus (Zöld-Narancs-Piros)", "Cyberpunk (Neon Kék-Rózsaszín)", "Tűz (Sárga-Narancs-Vörös)", "Jég (Türkiz-Kék-Fehér)", "Naplemente (Arany-Bíbor)", "VFD (Klasszikus Cián)"])
-        self.theme_combo.setCurrentIndex(self.settings.value("theme", 0, type=int))
-        layout.addRow("Színséma:", self.theme_combo)
-        
-        self.scale_slider = QSlider(Qt.Orientation.Horizontal)
-        self.scale_slider.setRange(50, 200)
-        self.scale_slider.setValue(int(self.settings.value("size_scale", 1.0, type=float) * 100))
-        layout.addRow("Méret skálázás (50-200%):", self.scale_slider)
-        
-        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
-        self.opacity_slider.setRange(0, 255)
-        self.opacity_slider.setValue(self.settings.value("opacity", 204, type=int))
-        layout.addRow("Háttér sötétsége:", self.opacity_slider)
-        
-        self.peak_combo = QComboBox()
-        self.peak_combo.addItems(["Fehér (klasszikus)", "Színes (LED)", "Fix sárga", "Fix cián"])
-        
-        # Migrate old colored_peak setting
-        if self.settings.contains("peak_mode"):
-            self.peak_combo.setCurrentIndex(self.settings.value("peak_mode", 0, type=int))
-        else:
-            old_colored = self.settings.value("colored_peak", False, type=bool)
-            self.peak_combo.setCurrentIndex(1 if old_colored else 0)
-            
-        layout.addRow("Peak LED stílusa:", self.peak_combo)
-
-        # Új ballisztika beállítások
-        self.target_decay_slider = QSlider(Qt.Orientation.Horizontal)
-        self.target_decay_slider.setRange(880, 970)
-        self.target_decay_slider.setValue(int(self.settings.value("target_decay", 0.94, type=float) * 1000))
-        layout.addRow("Célérték elengedés (0.88-0.97):", self.target_decay_slider)
-
-        self.peak_hold_slider = QSlider(Qt.Orientation.Horizontal)
-        self.peak_hold_slider.setRange(200, 3000)
-        # Migrate or fallback: ha korábban képkocka (10..180) volt elmentve, skálázzuk fel ms-be
-        saved_peak_hold = self.settings.value("peak_hold_ms", self.settings.value("peak_hold", 900, type=int), type=int)
-        if saved_peak_hold <= 180:
-            saved_peak_hold = int(saved_peak_hold * 16.6)
-        self.peak_hold_slider.setValue(saved_peak_hold)
-        layout.addRow("Peak tartási idő (200-3000 ms):", self.peak_hold_slider)
-
-        self.peak_decay_slider = QSlider(Qt.Orientation.Horizontal)
-        self.peak_decay_slider.setRange(900, 995)
-        self.peak_decay_slider.setValue(int(self.settings.value("peak_decay", 0.985, type=float) * 1000))
-        layout.addRow("Peak lecsengés (0.900-0.995):", self.peak_decay_slider)
-
-        self.spring_slider = QSlider(Qt.Orientation.Horizontal)
-        self.spring_slider.setRange(5, 40)
-        self.spring_slider.setValue(int(self.settings.value("analog_spring", 0.15, type=float) * 100))
-        layout.addRow("Analóg Rugó (0.05-0.40):", self.spring_slider)
-
-        self.damp_slider = QSlider(Qt.Orientation.Horizontal)
-        self.damp_slider.setRange(10, 40)
-        self.damp_slider.setValue(int(self.settings.value("analog_damp", 0.25, type=float) * 100))
-        layout.addRow("Analóg Csillapítás (0.10-0.40):", self.damp_slider)
-        
-        # Visual Effects (Látvány effektusok)
-        layout.addRow("--- Látvány effektusok / Visual Effects ---", QLabel(""))
-
-        self.fx_glow_check = QCheckBox("LED Ragyogás (Glow)")
-        self.fx_glow_check.setChecked(self.settings.value("fx_glow", True, type=bool))
-        layout.addRow("LED Ragyogás:", self.fx_glow_check)
-
-        self.fx_sheen_check = QCheckBox("Belső Fény / Csillanás (Sheen)")
-        self.fx_sheen_check.setChecked(self.settings.value("fx_sheen", True, type=bool))
-        layout.addRow("LED Csillanás:", self.fx_sheen_check)
-
-        self.fx_ghost_check = QCheckBox("Halvány inaktív LED-ek (Ghost LEDs)")
-        self.fx_ghost_check.setChecked(self.settings.value("fx_ghost", True, type=bool))
-        layout.addRow("Ghost LED-ek:", self.fx_ghost_check)
-
-        self.fx_db_scale_check = QCheckBox("dB Skála feliratok megjelenítése")
-        self.fx_db_scale_check.setChecked(self.settings.value("fx_db_scale", True, type=bool))
-        layout.addRow("dB Skála:", self.fx_db_scale_check)
-
-        self.attack_slider = QSlider(Qt.Orientation.Horizontal)
-        self.attack_slider.setRange(5, 100)
-        self.attack_slider.setValue(int(self.settings.value("attack_speed", 0.35, type=float) * 100))
-        layout.addRow("Egyéni Felfutás (5-100%):", self.attack_slider)
-        
-        self.decay_slider = QSlider(Qt.Orientation.Horizontal)
-        self.decay_slider.setRange(5, 100)
-        self.decay_slider.setValue(int(self.settings.value("decay_speed", 0.12, type=float) * 100))
-        layout.addRow("Egyéni Lecsengés (5-100%):", self.decay_slider)
-        
         self.gain_slider = QSlider(Qt.Orientation.Horizontal)
         self.gain_slider.setRange(1, 300)
         self.gain_slider.setValue(int(self.settings.value("gain", 1.0, type=float) * 100))
-        layout.addRow("Érzékenység (0.01x - 3.0x):", self.gain_slider)
-        
+        layout4.addRow("Érzékenység / Gain (0.01x - 3.0x):", self.gain_slider)
+
+        self.tabs.addTab(tab4, "Általános & Audió")
+
+        main_layout.addWidget(self.tabs)
+
+        # Gombok
         btn_layout = QHBoxLayout()
         save_btn = QPushButton("Mentés")
         save_btn.clicked.connect(self.save_settings)
@@ -180,13 +217,12 @@ class SettingsDialog(QDialog):
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(save_btn)
         btn_layout.addWidget(cancel_btn)
-        
-        layout.addRow(btn_layout)
-        
+        main_layout.addLayout(btn_layout)
+
     def save_settings(self):
-        # Save the hidden raw device name instead of the formatted text
         self.settings.setValue("input_device", self.device_combo.currentData())
         self.settings.setValue("detection_mode", self.detection_combo.currentIndex())
+        self.settings.setValue("rms_window_ms", self.rms_window_slider.value())
         self.settings.setValue("horizontal", self.layout_check.isChecked())
         self.settings.setValue("mode", self.mode_combo.currentIndex())
         self.settings.setValue("led_count", self.led_slider.value())
@@ -220,6 +256,13 @@ class VuMeter(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         
         self.settings = QSettings("StereoVU", "LinuxApp")
+        self.sample_rate = 44100
+        self.rms_history = None
+        self.rms_history_idx = 0
+        self.rms_history_count = 0
+        self.rms_window_samples = int(self.sample_rate * 0.35)
+        self.init_rms_buffer(self.settings.value("rms_window_ms", 350, type=int))
+
         self.load_settings()
         
         self.level_l = 0.0
@@ -241,6 +284,15 @@ class VuMeter(QWidget):
         self.stream = None
         self.start_audio_stream()
 
+    def init_rms_buffer(self, window_ms):
+        window_ms = max(50, min(1000, window_ms))
+        needed_samples = int(self.sample_rate * (window_ms / 1000.0))
+        if self.rms_history is None or self.rms_history.shape[0] != needed_samples:
+            self.rms_window_samples = needed_samples
+            self.rms_history = np.zeros((needed_samples, 2), dtype=np.float32)
+            self.rms_history_idx = 0
+            self.rms_history_count = 0
+
     def start_audio_stream(self):
         if self.stream is not None:
             self.stream.stop()
@@ -261,15 +313,14 @@ class VuMeter(QWidget):
                 print(f"Error querying devices: {e}")
 
         try:
-            self.stream = sd.InputStream(device=device_index, callback=self.audio_callback, channels=2, samplerate=44100)
+            self.stream = sd.InputStream(device=device_index, callback=self.audio_callback, channels=2, samplerate=self.sample_rate)
             self.stream.start()
         except Exception as e:
             print(f"Failed to start audio stream with device {device_name or 'default'}: {e}")
-            # Fallback to default if named device failed
             if device_index is not None:
                 try:
                     print("Falling back to default device...")
-                    self.stream = sd.InputStream(callback=self.audio_callback, channels=2, samplerate=44100)
+                    self.stream = sd.InputStream(callback=self.audio_callback, channels=2, samplerate=self.sample_rate)
                     self.stream.start()
                 except Exception as e2:
                     print(f"Failed to start fallback audio stream: {e2}")
@@ -281,6 +332,9 @@ class VuMeter(QWidget):
         self.size_scale = self.settings.value("size_scale", 1.0, type=float)
         self.bg_opacity = self.settings.value("opacity", 204, type=int)
         self.detection_mode = self.settings.value("detection_mode", 0, type=int) # 0 = Peak, 1 = RMS
+        self.rms_window_ms = self.settings.value("rms_window_ms", 350, type=int)
+        self.init_rms_buffer(self.rms_window_ms)
+
         self.is_horizontal = self.settings.value("horizontal", False, type=bool)
         
         if self.settings.contains("peak_mode"):
@@ -303,7 +357,6 @@ class VuMeter(QWidget):
             
         self.digital_gain = self.settings.value("gain", 1.0, type=float)
         self.target_decay = self.settings.value("target_decay", 0.94, type=float)
-        # Unify peak hold to milliseconds (peak_hold_ms) and convert to frame count (16ms per frame)
         saved_peak_hold = self.settings.value("peak_hold_ms", self.settings.value("peak_hold", 900, type=int), type=int)
         if saved_peak_hold <= 180:
             saved_peak_hold = int(saved_peak_hold * 16.6)
@@ -318,14 +371,10 @@ class VuMeter(QWidget):
         self.fx_ghost = self.settings.value("fx_ghost", True, type=bool)
         self.fx_db_scale = self.settings.value("fx_db_scale", True, type=bool)
         
-        # Ablak méretezése az elrendezés (vízszintes vs függőleges) és LED szám szerint
         if self.is_horizontal:
-            # L fent, R lent: szélesség a LED-ek szerint nyúlik el
             base_w = 40 + self.num_leds * 13 + (15 if self.fx_db_scale else 0)
             base_h = 92 if self.fx_db_scale else 78
         else:
-            # Függőleges tornyok (mint az Android alapértelmezett oszlopos nézete):
-            # 2 oszlop egymás mellett + skála
             base_w = 125 if self.fx_db_scale else 100
             base_h = 36 + self.num_leds * 13
 
@@ -333,12 +382,43 @@ class VuMeter(QWidget):
         self.update()
 
     def audio_callback(self, indata, frames, time, status):
-        if self.detection_mode == 1: # RMS
-            val_l = np.sqrt(np.mean(indata[:, 0]**2))
-            val_r = np.sqrt(np.mean(indata[:, 1]**2))
-        else: # Peak (abszolút csúcsérték az adott pufferben)
-            val_l = np.max(np.abs(indata[:, 0]))
-            val_r = np.max(np.abs(indata[:, 1]))
+        # Peak detection: true peak of the current audio buffer (max absolute sample)
+        # Fast, direct, responsive
+        peak_l = float(np.max(np.abs(indata[:, 0]))) if frames > 0 else 0.0
+        peak_r = float(np.max(np.abs(indata[:, 1]))) if frames > 0 else 0.0
+
+        # True RMS calculation over sliding window (independent from peak)
+        if self.detection_mode == 1:
+            if self.rms_history is None or self.rms_history.shape[0] != self.rms_window_samples:
+                self.init_rms_buffer(self.rms_window_ms)
+
+            buf_len = self.rms_window_samples
+            n = len(indata)
+            if n >= buf_len:
+                self.rms_history[:] = indata[-buf_len:]
+                self.rms_history_idx = 0
+                self.rms_history_count = buf_len
+            else:
+                end_idx = self.rms_history_idx + n
+                if end_idx <= buf_len:
+                    self.rms_history[self.rms_history_idx:end_idx] = indata
+                    self.rms_history_idx = end_idx % buf_len
+                else:
+                    first_part = buf_len - self.rms_history_idx
+                    self.rms_history[self.rms_history_idx:] = indata[:first_part]
+                    second_part = n - first_part
+                    self.rms_history[:second_part] = indata[first_part:]
+                    self.rms_history_idx = second_part
+                self.rms_history_count = min(buf_len, self.rms_history_count + n)
+
+            count = max(1, self.rms_history_count)
+            # Calculate RMS correctly over the window
+            active_samples = self.rms_history if self.rms_history_count >= buf_len else self.rms_history[:count]
+            val_l = float(np.sqrt(np.mean(active_samples[:, 0] ** 2)))
+            val_r = float(np.sqrt(np.mean(active_samples[:, 1] ** 2)))
+        else:
+            val_l = peak_l
+            val_r = peak_r
 
         def to_level(signal):
             db = 20 * math.log10(max(signal, 0.0001))
@@ -347,13 +427,12 @@ class VuMeter(QWidget):
         new_target_l = to_level(val_l * 3.0 * self.digital_gain)
         new_target_r = to_level(val_r * 3.0 * self.digital_gain)
 
-        # Csúcs-követő (peak follower): azonnal felugrik, majd a ciklusban fokozatosan halkul
+        # Responsive fast attack, follower decay
         self.target_l = min(1.0, max(self.target_l, new_target_l))
         self.target_r = min(1.0, max(self.target_r, new_target_r))
 
     def update_meter(self):
         if self.mode == 1:
-            # Analog spring physics finomhangolható rugó és csillapítás paraméterekkel
             self.vel_l += (self.target_l - self.level_l) * self.analog_spring
             self.vel_l *= (1.0 - self.analog_damp)
             self.level_l += self.vel_l
@@ -362,7 +441,6 @@ class VuMeter(QWidget):
             self.vel_r *= (1.0 - self.analog_damp)
             self.level_r += self.vel_r
             
-            # Bouncing overshoot korlátozása
             self.level_l = max(0.0, min(1.2, self.level_l))
             self.level_r = max(0.0, min(1.2, self.level_r))
         else:
@@ -393,7 +471,6 @@ class VuMeter(QWidget):
             if self.peak_hold_r > 0: self.peak_hold_r -= 1
             else: self.peak_r *= self.peak_decay_rate
 
-        # Célérték fokozatos elengedése (release decay)
         self.target_l *= self.target_decay
         self.target_r *= self.target_decay
             
@@ -404,7 +481,6 @@ class VuMeter(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
         if self.theme_id == 5:
-            # Sötét fekete-teal panel Videoton stílusban
             painter.setBrush(QColor(10, 18, 21, self.bg_opacity))
             painter.setPen(QColor(0, 56, 64, 180))
             painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), int(10 * self.size_scale), int(10 * self.size_scale))
@@ -417,7 +493,6 @@ class VuMeter(QWidget):
         display_r = max(0.0, min(1.0, self.level_r))
 
         if self.is_horizontal:
-            # Vízszintes sávok (L fent, R lent)
             start_x = int(35 * self.size_scale)
             y_l = int(10 * self.size_scale)
             y_scale = int(34 * self.size_scale)
@@ -437,7 +512,6 @@ class VuMeter(QWidget):
                 painter.drawLine(start_x, y_r + int(led_h * 0.25), end_x, y_r + int(led_h * 0.25))
                 painter.drawLine(start_x, y_r + int(led_h * 0.75), end_x, y_r + int(led_h * 0.75))
         else:
-            # Függőleges tornyok (L bal, R jobb + dB skála)
             col_w = int(34 * self.size_scale)
             x_l = int(14 * self.size_scale)
             x_r = int(54 * self.size_scale)
@@ -561,7 +635,6 @@ class VuMeter(QWidget):
                         painter.drawRect(int(sub_x), int(y_offset), int(sub_w), int(led_h))
 
                     if is_on and self.fx_sheen:
-                        # Inner glare / gradient sheen
                         painter.setBrush(QColor(255, 255, 255, 75))
                         painter.drawRect(int(sub_x + 1), int(y_offset + 1), int(sub_w - 2), int(led_h * 0.4))
 
@@ -788,7 +861,6 @@ class VuMeter(QWidget):
                         painter.setPen(QColor(255, 255, 255, 180))
                         painter.drawRect(int(x_offset), int(y), int(led_w), int(led_h))
 
-    # Backward compatibility helper
     def draw_channel(self, painter, level, peak, y_offset, label):
         self.draw_channel_horizontal(painter, level, peak, y_offset, label)
 
@@ -832,10 +904,8 @@ if __name__ == '__main__':
     import signal
     app = QApplication(sys.argv)
 
-    # Kézi megszakítás kezelése (Ctrl+C)
     signal.signal(signal.SIGINT, lambda sig, frame: app.quit())
 
-    # Timer a jelek feldolgozásához
     timer = QTimer()
     timer.timeout.connect(lambda: None)
     timer.start(500)
