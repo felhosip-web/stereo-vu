@@ -42,7 +42,16 @@ class SettingsDialog(QDialog):
         layout1.addRow("RMS ablak (50-1000 ms):", rms_box)
 
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["Digitális Peak", "Analóg VU", "PPM", "Egyéni"])
+        self.mode_combo.addItems([
+            "Digitális Peak",
+            "Analóg VU",
+            "PPM",
+            "True Peak",
+            "Classic VU",
+            "BBC PPM",
+            "Nordic / DIN",
+            "Egyéni"
+        ])
         self.mode_combo.setCurrentIndex(self.settings.value("mode", 0, type=int))
         layout1.addRow("Üzemmód (Ballisztika):", self.mode_combo)
 
@@ -73,6 +82,10 @@ class SettingsDialog(QDialog):
         self.peak_decay_slider.setRange(900, 995)
         self.peak_decay_slider.setValue(int(self.settings.value("peak_decay", 0.985, type=float) * 1000))
         layout1.addRow("Peak lecsengés (0.900-0.995):", self.peak_decay_slider)
+
+        self.peak_never_below_check = QCheckBox("Bekapcsolva")
+        self.peak_never_below_check.setChecked(self.settings.value("peak_never_below_bar", True, type=bool))
+        layout1.addRow("Peak soha nem megy a sáv alá:", self.peak_never_below_check)
 
         self.spring_slider = QSlider(Qt.Orientation.Horizontal)
         self.spring_slider.setRange(5, 40)
@@ -234,6 +247,7 @@ class SettingsDialog(QDialog):
         self.settings.setValue("peak_hold_ms", self.peak_hold_slider.value())
         self.settings.setValue("peak_hold", self.peak_hold_slider.value())
         self.settings.setValue("peak_decay", self.peak_decay_slider.value() / 1000.0)
+        self.settings.setValue("peak_never_below_bar", self.peak_never_below_check.isChecked())
         self.settings.setValue("analog_spring", self.spring_slider.value() / 100.0)
         self.settings.setValue("analog_damp", self.damp_slider.value() / 100.0)
         self.settings.setValue("attack_speed", self.attack_slider.value() / 100.0)
@@ -275,6 +289,8 @@ class VuMeter(QWidget):
         self.peak_r = 0.0
         self.peak_hold_l = 0
         self.peak_hold_r = 0
+        self.bbc_step_timer_l = 0
+        self.bbc_step_timer_r = 0
         
         self.drag_pos = QPoint()
         self.timer = QTimer()
@@ -342,15 +358,31 @@ class VuMeter(QWidget):
         else:
             self.peak_mode = 1 if self.settings.value("colored_peak", False, type=bool) else 0
             
-        if self.mode == 0: # Digital Peak: gyorsabb felfutás, lassabb karakteres lecsengés
+        self.peak_never_below_bar = self.settings.value("peak_never_below_bar", True, type=bool)
+
+        if self.mode == 0: # Digital Peak: fast attack, characterful decay
             self.attack_speed = 0.90
             self.decay_speed = 0.12
-        elif self.mode == 1: # Analog
+        elif self.mode == 1: # Analog VU: slow ~300 ms integration feel
             self.attack_speed = 0.10
             self.decay_speed = 0.05
-        elif self.mode == 2: # PPM
+        elif self.mode == 2: # PPM: fast attack, slow release
             self.attack_speed = 0.40
             self.decay_speed = 0.08
+        elif self.mode == 3: # True Peak: inter-sample peak, fast attack, clean decay
+            self.attack_speed = 0.95
+            self.decay_speed = 0.15
+        elif self.mode == 4: # Classic VU: 300 ms integration, smoother ±1 dB style ballistics
+            self.attack_speed = 0.08
+            self.decay_speed = 0.04
+            self.analog_spring = 0.10
+            self.analog_damp = 0.32
+        elif self.mode == 5: # BBC PPM: characteristic stepped / multi-stage release
+            self.attack_speed = 0.45
+            self.decay_speed = 0.06
+        elif self.mode == 6: # Nordic / DIN: faster attack, distinct (slightly faster) decay
+            self.attack_speed = 0.55
+            self.decay_speed = 0.14
         else:
             self.attack_speed = self.settings.value("attack_speed", 0.35, type=float)
             self.decay_speed = self.settings.value("decay_speed", 0.12, type=float)
@@ -386,6 +418,20 @@ class VuMeter(QWidget):
         # Fast, direct, responsive
         peak_l = float(np.max(np.abs(indata[:, 0]))) if frames > 0 else 0.0
         peak_r = float(np.max(np.abs(indata[:, 1]))) if frames > 0 else 0.0
+
+        # Inter-sample peak calculation when in True Peak mode (interpolating between samples)
+        if self.mode == 3 and frames > 1:
+            chan_l = indata[:, 0]
+            chan_r = indata[:, 1]
+            # Interpolated sub-sample points (linear midpoint & quarter points)
+            mid_l = 0.5 * (chan_l[:-1] + chan_l[1:])
+            mid_r = 0.5 * (chan_r[:-1] + chan_r[1:])
+            q1_l = 0.75 * chan_l[:-1] + 0.25 * chan_l[1:]
+            q3_l = 0.25 * chan_l[:-1] + 0.75 * chan_l[1:]
+            q1_r = 0.75 * chan_r[:-1] + 0.25 * chan_r[1:]
+            q3_r = 0.25 * chan_r[:-1] + 0.75 * chan_r[1:]
+            peak_l = max(peak_l, float(np.max(np.abs(mid_l))), float(np.max(np.abs(q1_l))), float(np.max(np.abs(q3_l))))
+            peak_r = max(peak_r, float(np.max(np.abs(mid_r))), float(np.max(np.abs(q1_r))), float(np.max(np.abs(q3_r))))
 
         # True RMS calculation over sliding window (independent from peak)
         if self.detection_mode == 1:
@@ -432,7 +478,8 @@ class VuMeter(QWidget):
         self.target_r = min(1.0, max(self.target_r, new_target_r))
 
     def update_meter(self):
-        if self.mode == 1:
+        if self.mode == 1 or self.mode == 4:
+            # 1: Analog VU, 4: Classic VU (spring/damp 2nd-order ballistics)
             self.vel_l += (self.target_l - self.level_l) * self.analog_spring
             self.vel_l *= (1.0 - self.analog_damp)
             self.level_l += self.vel_l
@@ -443,6 +490,27 @@ class VuMeter(QWidget):
             
             self.level_l = max(0.0, min(1.2, self.level_l))
             self.level_r = max(0.0, min(1.2, self.level_r))
+        elif self.mode == 5:
+            # BBC PPM: stepped / multi-stage release
+            if self.target_l > self.level_l:
+                self.level_l += (self.target_l - self.level_l) * self.attack_speed
+                self.bbc_step_timer_l = 0
+            else:
+                self.bbc_step_timer_l += 1
+                if self.bbc_step_timer_l >= 3:
+                    drop = max(0.008, self.level_l * 0.05)
+                    self.level_l = max(self.target_l, self.level_l - drop)
+                    self.bbc_step_timer_l = 0
+
+            if self.target_r > self.level_r:
+                self.level_r += (self.target_r - self.level_r) * self.attack_speed
+                self.bbc_step_timer_r = 0
+            else:
+                self.bbc_step_timer_r += 1
+                if self.bbc_step_timer_r >= 3:
+                    drop = max(0.008, self.level_r * 0.05)
+                    self.level_r = max(self.target_r, self.level_r - drop)
+                    self.bbc_step_timer_r = 0
         else:
             if self.target_l > self.level_l:
                 self.level_l += (self.target_l - self.level_l) * self.attack_speed
@@ -457,19 +525,30 @@ class VuMeter(QWidget):
         display_l = max(0.0, min(1.0, self.level_l))
         display_r = max(0.0, min(1.0, self.level_r))
 
-        if display_l > self.peak_l:
+        if display_l >= self.peak_l:
             self.peak_l = display_l
             self.peak_hold_l = self.peak_hold_time
         else:
-            if self.peak_hold_l > 0: self.peak_hold_l -= 1
-            else: self.peak_l *= self.peak_decay_rate
+            if self.peak_hold_l > 0:
+                self.peak_hold_l -= 1
+            else:
+                self.peak_l *= self.peak_decay_rate
             
-        if display_r > self.peak_r:
+        if display_r >= self.peak_r:
             self.peak_r = display_r
             self.peak_hold_r = self.peak_hold_time
         else:
-            if self.peak_hold_r > 0: self.peak_hold_r -= 1
-            else: self.peak_r *= self.peak_decay_rate
+            if self.peak_hold_r > 0:
+                self.peak_hold_r -= 1
+            else:
+                self.peak_r *= self.peak_decay_rate
+
+        # Peak never below bar guarantee
+        if self.peak_never_below_bar:
+            if self.peak_l < display_l:
+                self.peak_l = display_l
+            if self.peak_r < display_r:
+                self.peak_r = display_r
 
         self.target_l *= self.target_decay
         self.target_r *= self.target_decay

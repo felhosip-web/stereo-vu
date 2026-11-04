@@ -171,6 +171,10 @@ class MainActivity : Activity() {
             "Digitális Peak (Gyors, pontos)",
             "Analóg VU (Rugós tehetetlenség)",
             "PPM (Gyors felfutás, lassú lecsengés)",
+            "True Peak (Inter-sample peak)",
+            "Classic VU (300 ms integráció, ±1 dB)",
+            "BBC PPM (Lépcsős / több-fázisú lecsengés)",
+            "Nordic / DIN (Gyors attack, egyedi decay)",
             "Egyéni (Csúszkák alapján)"
         )
         val modeSpinner = Spinner(this).apply {
@@ -258,6 +262,19 @@ class MainActivity : Activity() {
         ) { v ->
             java.lang.String.format(Locale.US, "%.3f", v)
         }
+
+        // Peak never below bar
+        val peakNeverBelowCheckbox = CheckBox(this).apply {
+            text = "Peak soha nem megy a sáv alá (Peak never below bar)"
+            setTextColor(Color.parseColor("#E0E0E0"))
+            textSize = 14f
+            isChecked = prefs.getBoolean("peak_never_below_bar", true)
+            setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean("peak_never_below_bar", isChecked).apply()
+            }
+            layoutParams = layoutParamsMatch
+        }
+        sec1.addView(peakNeverBelowCheckbox)
 
         // Analóg rugó & csillapítás
         addSlider(

@@ -24,12 +24,14 @@ class FloatingVuService : Service() {
     private var running = true
     @Volatile private var amplitudeCount = 32767.0
     @Volatile private var detectionMode = 0 // 0 = Peak, 1 = RMS
+    @Volatile private var ballisticsMode = 0 // 0..7 (3 = True Peak)
     @Volatile private var rmsWindowMs = 350 // Default 350 ms (50 - 1000 ms)
 
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
         when (key) {
             "amplitude_count" -> amplitudeCount = prefs.getInt("amplitude_count", 32767).toDouble()
             "detection_mode" -> detectionMode = prefs.getInt("detection_mode", 0)
+            "mode" -> ballisticsMode = prefs.getInt("mode", 0)
             "rms_window_ms" -> rmsWindowMs = prefs.getInt("rms_window_ms", 350).coerceIn(50, 1000)
         }
     }
@@ -41,6 +43,7 @@ class FloatingVuService : Service() {
         val prefs = getSharedPreferences("StereoVuPrefs", Context.MODE_PRIVATE)
         amplitudeCount = prefs.getInt("amplitude_count", 32767).toDouble()
         detectionMode = prefs.getInt("detection_mode", 0)
+        ballisticsMode = prefs.getInt("mode", 0)
         rmsWindowMs = prefs.getInt("rms_window_ms", 350).coerceIn(50, 1000)
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
         
@@ -57,6 +60,7 @@ class FloatingVuService : Service() {
         val prefs = getSharedPreferences("StereoVuPrefs", Context.MODE_PRIVATE)
         amplitudeCount = prefs.getInt("amplitude_count", 32767).toDouble()
         detectionMode = prefs.getInt("detection_mode", 0)
+        ballisticsMode = prefs.getInt("mode", 0)
         rmsWindowMs = prefs.getInt("rms_window_ms", 350).coerceIn(50, 1000)
         
         showOverlay()
@@ -184,11 +188,13 @@ class FloatingVuService : Service() {
                     if (read > 0) {
                         val maxAmp = amplitudeCount
                         val isRms = (detectionMode == 1)
+                        val isTruePeak = (ballisticsMode == 3)
 
-                        // Peak detection: True peak of current audio buffer (max absolute sample)
-                        // Fast, responsive attack
+                        // Peak detection: standard peak or True Peak (inter-sample peak interpolation)
                         var peakMaxL = 0.0
                         var peakMaxR = 0.0
+                        var prevL = 0.0
+                        var prevR = 0.0
 
                         val reqWindowMs = rmsWindowMs.coerceIn(50, 1000)
                         if (reqWindowMs != lastWindowMs) {
@@ -201,6 +207,7 @@ class FloatingVuService : Service() {
                         }
 
                         var i = 0
+                        var sampleIdx = 0
                         while (i < read - 1) {
                             val l = buffer[i].toDouble() / maxAmp
                             val r = buffer[i + 1].toDouble() / maxAmp
@@ -208,6 +215,27 @@ class FloatingVuService : Service() {
                             val absR = Math.abs(r)
                             if (absL > peakMaxL) peakMaxL = absL
                             if (absR > peakMaxR) peakMaxR = absR
+
+                            // Inter-sample peak (linear / parabolic interpolation between consecutive samples)
+                            if (isTruePeak && sampleIdx > 0) {
+                                val midL = Math.abs(0.5 * (l + prevL))
+                                val midR = Math.abs(0.5 * (r + prevR))
+                                if (midL > peakMaxL) peakMaxL = midL
+                                if (midR > peakMaxR) peakMaxR = midR
+
+                                // 4-point linear sub-samples for higher precision
+                                val q1L = Math.abs(0.75 * prevL + 0.25 * l)
+                                val q3L = Math.abs(0.25 * prevL + 0.75 * l)
+                                val q1R = Math.abs(0.75 * prevR + 0.25 * r)
+                                val q3R = Math.abs(0.25 * prevR + 0.75 * r)
+                                if (q1L > peakMaxL) peakMaxL = q1L
+                                if (q3L > peakMaxL) peakMaxL = q3L
+                                if (q1R > peakMaxR) peakMaxR = q1R
+                                if (q3R > peakMaxR) peakMaxR = q3R
+                            }
+                            prevL = l
+                            prevR = r
+                            sampleIdx++
 
                             val sqL = l * l
                             val sqR = r * r

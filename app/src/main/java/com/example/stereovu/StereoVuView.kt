@@ -40,6 +40,9 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     private var analogDamp = 0.25f
     private var mode = 0
     private var useLpf = false
+    private var peakNeverBelowBar = true
+    private var bbcStepTimerL = 0
+    private var bbcStepTimerR = 0
     private var isHorizontal = false
     private var gain = 1.0f
     private var sizeScale = 1.0f
@@ -96,8 +99,9 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         // 60fps decay + peak fade loop - EZ MOZGATJA A KIJELZÉST
         postDelayed(object : Runnable {
             override fun run() {
-                if (mode == 1) {
-                    // Analóg rugós (spring) fizika finomhangolható paraméterekkel
+                if (mode == 1 || mode == 4) {
+                    // 1: Analog VU (~300 ms integration feel, spring/damp)
+                    // 4: Classic VU (300 ms integration, smoother ±1 dB style ballistics)
                     velL += (targetL - levelL) * analogSpring
                     velL *= (1f - analogDamp)
                     levelL += velL
@@ -105,12 +109,39 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                     velR += (targetR - levelR) * analogSpring
                     velR *= (1f - analogDamp)
                     levelR += velR
+                } else if (mode == 5) {
+                    // BBC PPM: Characteristic stepped / multi-stage release (classic British PPM feel)
+                    // Attack is fast (~10ms)
+                    if (targetL > levelL) {
+                        levelL += (targetL - levelL) * attackSpeed
+                        bbcStepTimerL = 0
+                    } else {
+                        // Multi-stage / stepped release: quantize fall in small discrete stair steps every few frames
+                        bbcStepTimerL++
+                        if (bbcStepTimerL >= 3) {
+                            val drop = (levelL * 0.05f).coerceAtLeast(0.008f)
+                            levelL = (levelL - drop).coerceAtLeast(targetL)
+                            bbcStepTimerL = 0
+                        }
+                    }
+
+                    if (targetR > levelR) {
+                        levelR += (targetR - levelR) * attackSpeed
+                        bbcStepTimerR = 0
+                    } else {
+                        bbcStepTimerR++
+                        if (bbcStepTimerR >= 3) {
+                            val drop = (levelR * 0.05f).coerceAtLeast(0.008f)
+                            levelR = (levelR - drop).coerceAtLeast(targetR)
+                            bbcStepTimerR = 0
+                        }
+                    }
                 } else if (useLpf) {
                     // Szigorú digitális aluláteresztő szűrő (symmetrical 1-pole IIR)
                     levelL += (targetL - levelL) * attackSpeed
                     levelR += (targetR - levelR) * attackSpeed
                 } else {
-                    // Aszimmetrikus (klasszikus csúcs / peak)
+                    // Aszimmetrikus (Digital Peak, PPM, True Peak, Nordic/DIN, Custom)
                     if (targetL > levelL) levelL += (targetL - levelL) * attackSpeed
                     else levelL -= (levelL - targetL) * decaySpeed
     
@@ -124,19 +155,44 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                 val displayLevelL = levelL.coerceIn(0f, 1f)
                 val displayLevelR = levelR.coerceIn(0f, 1f)
 
-                if (displayLevelL > peakL) { peakL = displayLevelL; peakHoldL = System.currentTimeMillis(); peakAlphaL = 255f }
-                if (displayLevelR > peakR) { peakR = displayLevelR; peakHoldR = System.currentTimeMillis(); peakAlphaR = 255f }
-
                 val now = System.currentTimeMillis()
-                // A peak alpha elhalványulási sebességét a peakHoldMs-hez skálázzuk, hogy hosszabb tartás esetén se tűnjön el túl korán
-                val alphaFadeStep = (255f / (peakHoldMs / 16f).coerceAtLeast(10f)).coerceIn(1f, 10f)
-                if (now - peakHoldL > peakHoldMs) {
-                    peakL *= peakDecay
-                    peakAlphaL = (peakAlphaL - alphaFadeStep).coerceAtLeast(0f)
+
+                // Peak tracking: if level rises above peak, jump with it and reset hold
+                if (displayLevelL >= peakL) {
+                    peakL = displayLevelL
+                    peakHoldL = now
+                    peakAlphaL = 255f
+                } else {
+                    // Decay only starts after hold time expires AND current level is below peak
+                    if (now - peakHoldL > peakHoldMs) {
+                        peakL *= peakDecay
+                        val alphaFadeStep = (255f / (peakHoldMs / 16f).coerceAtLeast(10f)).coerceIn(1f, 10f)
+                        peakAlphaL = (peakAlphaL - alphaFadeStep).coerceAtLeast(0f)
+                    }
                 }
-                if (now - peakHoldR > peakHoldMs) {
-                    peakR *= peakDecay
-                    peakAlphaR = (peakAlphaR - alphaFadeStep).coerceAtLeast(0f)
+
+                if (displayLevelR >= peakR) {
+                    peakR = displayLevelR
+                    peakHoldR = now
+                    peakAlphaR = 255f
+                } else {
+                    if (now - peakHoldR > peakHoldMs) {
+                        peakR *= peakDecay
+                        val alphaFadeStep = (255f / (peakHoldMs / 16f).coerceAtLeast(10f)).coerceIn(1f, 10f)
+                        peakAlphaR = (peakAlphaR - alphaFadeStep).coerceAtLeast(0f)
+                    }
+                }
+
+                // Peak never below bar guarantee
+                if (peakNeverBelowBar) {
+                    if (peakL < displayLevelL) {
+                        peakL = displayLevelL
+                        peakAlphaL = 255f
+                    }
+                    if (peakR < displayLevelR) {
+                        peakR = displayLevelR
+                        peakAlphaR = 255f
+                    }
                 }
 
                 targetL *= targetDecay
@@ -199,12 +255,47 @@ class StereoVuView(context: Context) : FrameLayout(context) {
             setLayerType(LAYER_TYPE_HARDWARE, null)
         }
         
+        peakNeverBelowBar = prefs.getBoolean("peak_never_below_bar", true)
         mode = prefs.getInt("mode", 0)
         when (mode) {
-            0 -> { attackSpeed = 0.90f; decaySpeed = 0.12f } // Digitális Peak: gyorsabb felfutás, karakteresebb lassabb lecsengés
-            1 -> { attackSpeed = 0.10f; decaySpeed = 0.05f } // Analóg
-            2 -> { attackSpeed = 0.40f; decaySpeed = 0.08f } // PPM
-            3 -> { 
+            0 -> { // Digital Peak: fast attack, characterful decay
+                attackSpeed = 0.90f
+                decaySpeed = 0.12f
+            }
+            1 -> { // Analog VU: slow ~300 ms integration feel
+                attackSpeed = 0.10f
+                decaySpeed = 0.05f
+                analogSpring = prefs.getFloat("analog_spring", 0.15f)
+                analogDamp = prefs.getFloat("analog_damp", 0.25f)
+            }
+            2 -> { // PPM: fast attack, slow release
+                attackSpeed = 0.40f
+                decaySpeed = 0.08f
+            }
+            3 -> { // True Peak: fast attack, clean decay
+                attackSpeed = 0.95f
+                decaySpeed = 0.15f
+            }
+            4 -> { // Classic VU: 300 ms integration, smoother ±1 dB style ballistics
+                attackSpeed = 0.08f
+                decaySpeed = 0.04f
+                analogSpring = 0.10f
+                analogDamp = 0.32f
+            }
+            5 -> { // BBC PPM: stepped / multi-stage release (classic British PPM feel)
+                attackSpeed = 0.45f
+                decaySpeed = 0.06f
+            }
+            6 -> { // Nordic / DIN: faster attack, distinct (slightly faster) decay
+                attackSpeed = 0.55f
+                decaySpeed = 0.14f
+            }
+            7 -> { // Custom: user-defined attack / decay
+                attackSpeed = prefs.getFloat("attack", 0.35f)
+                val decay = prefs.getFloat("decay", 0.88f)
+                decaySpeed = (1f - decay).coerceIn(0.01f, 1.0f)
+            }
+            else -> {
                 attackSpeed = prefs.getFloat("attack", 0.35f)
                 val decay = prefs.getFloat("decay", 0.88f)
                 decaySpeed = 1f - decay
