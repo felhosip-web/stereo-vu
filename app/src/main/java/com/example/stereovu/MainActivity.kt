@@ -368,6 +368,30 @@ class MainActivity : Activity() {
         }
         sec2.addView(dbScaleCheckbox)
 
+        val liveDbCheckbox = CheckBox(this).apply {
+            text = "Élő dB érték (Live dB readout)"
+            setTextColor(Color.parseColor("#E0E0E0"))
+            textSize = 14f
+            isChecked = prefs.getBoolean("show_live_db", true)
+            setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean("show_live_db", isChecked).apply()
+            }
+            layoutParams = layoutParamsMatch
+        }
+        sec2.addView(liveDbCheckbox)
+
+        val peakDbCheckbox = CheckBox(this).apply {
+            text = "Csúcsérték dB (Peak dB readout)"
+            setTextColor(Color.parseColor("#E0E0E0"))
+            textSize = 14f
+            isChecked = prefs.getBoolean("show_peak_db", true)
+            setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean("show_peak_db", isChecked).apply()
+            }
+            layoutParams = layoutParamsMatch
+        }
+        sec2.addView(peakDbCheckbox)
+
         container.addView(sec2)
 
         // =========================================================================
@@ -389,7 +413,9 @@ class MainActivity : Activity() {
             "Tűz (Sárga-Narancs-Vörös)",
             "Jég (Türkiz-Kék-Fehér)",
             "Naplemente (Arany-Bíbor)",
-            "VFD (Klasszikus Cián)"
+            "VFD (Klasszikus Cián)",
+            "LCD Zöld (Retro LCD Green)",
+            "LCD Borostyán (LCD Amber)"
         )
         val themeSpinner = Spinner(this).apply {
             val adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, themes).apply {

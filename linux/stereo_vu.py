@@ -121,6 +121,14 @@ class SettingsDialog(QDialog):
         self.fx_db_scale_check.setChecked(self.settings.value("fx_db_scale", True, type=bool))
         layout2.addRow("dB Skála feliratok:", self.fx_db_scale_check)
 
+        self.show_live_db_check = QCheckBox("Bekapcsolva")
+        self.show_live_db_check.setChecked(self.settings.value("show_live_db", True, type=bool))
+        layout2.addRow("Élő dB érték (Live dB):", self.show_live_db_check)
+
+        self.show_peak_db_check = QCheckBox("Bekapcsolva")
+        self.show_peak_db_check.setChecked(self.settings.value("show_peak_db", True, type=bool))
+        layout2.addRow("Csúcsérték dB (Peak dB):", self.show_peak_db_check)
+
         self.tabs.addTab(tab2, "Látvány effektek")
 
         # -------------------------------------------------------------
@@ -130,7 +138,16 @@ class SettingsDialog(QDialog):
         layout3 = QFormLayout(tab3)
 
         self.theme_combo = QComboBox()
-        self.theme_combo.addItems(["Klasszikus (Zöld-Narancs-Piros)", "Cyberpunk (Neon Kék-Rózsaszín)", "Tűz (Sárga-Narancs-Vörös)", "Jég (Türkiz-Kék-Fehér)", "Naplemente (Arany-Bíbor)", "VFD (Klasszikus Cián)"])
+        self.theme_combo.addItems([
+            "Klasszikus (Zöld-Narancs-Piros)",
+            "Cyberpunk (Neon Kék-Rózsaszín)",
+            "Tűz (Sárga-Narancs-Vörös)",
+            "Jég (Türkiz-Kék-Fehér)",
+            "Naplemente (Arany-Bíbor)",
+            "VFD (Klasszikus Cián)",
+            "LCD Zöld (Retro LCD Green)",
+            "LCD Borostyán (LCD Amber)"
+        ])
         self.theme_combo.setCurrentIndex(self.settings.value("theme", 0, type=int))
         layout3.addRow("Színséma:", self.theme_combo)
 
@@ -257,6 +274,8 @@ class SettingsDialog(QDialog):
         self.settings.setValue("fx_sheen", self.fx_sheen_check.isChecked())
         self.settings.setValue("fx_ghost", self.fx_ghost_check.isChecked())
         self.settings.setValue("fx_db_scale", self.fx_db_scale_check.isChecked())
+        self.settings.setValue("show_live_db", self.show_live_db_check.isChecked())
+        self.settings.setValue("show_peak_db", self.show_peak_db_check.isChecked())
         self.accept()
 
 class VuMeter(QWidget):
@@ -402,13 +421,18 @@ class VuMeter(QWidget):
         self.fx_sheen = self.settings.value("fx_sheen", True, type=bool)
         self.fx_ghost = self.settings.value("fx_ghost", True, type=bool)
         self.fx_db_scale = self.settings.value("fx_db_scale", True, type=bool)
+        self.show_live_db = self.settings.value("show_live_db", True, type=bool)
+        self.show_peak_db = self.settings.value("show_peak_db", True, type=bool)
         
+        extra_readout_w = 65 if (self.show_live_db or self.show_peak_db) else 0
+        extra_readout_h = 28 if (self.show_live_db or self.show_peak_db) else 0
+
         if self.is_horizontal:
-            base_w = 40 + self.num_leds * 13 + (15 if self.fx_db_scale else 0)
+            base_w = 40 + self.num_leds * 13 + (15 if self.fx_db_scale else 0) + extra_readout_w
             base_h = 92 if self.fx_db_scale else 78
         else:
             base_w = 125 if self.fx_db_scale else 100
-            base_h = 36 + self.num_leds * 13
+            base_h = 36 + self.num_leds * 13 + extra_readout_h
 
         self.resize(int(base_w * self.size_scale), int(base_h * self.size_scale))
         self.update()
@@ -555,21 +579,52 @@ class VuMeter(QWidget):
             
         self.update()
 
+    def format_db(self, level):
+        db = (level * 50.0) - 50.0
+        return "-INF" if db <= -49.5 else f"{db:+.1f}"
+
+    def draw_rack_screws(self, painter, w, h):
+        r = int(3 * self.size_scale)
+        m = int(5 * self.size_scale)
+        pts = [(m, m), (w - m, m), (m, h - m), (w - m, h - m)]
+        painter.setBrush(QColor(34, 34, 34))
+        painter.setPen(QColor(68, 68, 68))
+        for px, py in pts:
+            painter.drawEllipse(px - r, py - r, r * 2, r * 2)
+            painter.drawLine(px - r + 1, py, px + r - 1, py)
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
         if self.theme_id == 5:
-            painter.setBrush(QColor(10, 18, 21, self.bg_opacity))
-            painter.setPen(QColor(0, 56, 64, 180))
-            painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), int(10 * self.size_scale), int(10 * self.size_scale))
+            bg_color = QColor(10, 18, 21, self.bg_opacity)
+            border_color = QColor(0, 56, 64, 180)
+        elif self.theme_id == 6:
+            bg_color = QColor(10, 26, 10, self.bg_opacity)
+            border_color = QColor(26, 56, 26, 180)
+        elif self.theme_id == 7:
+            bg_color = QColor(18, 10, 0, self.bg_opacity)
+            border_color = QColor(56, 34, 0, 180)
         else:
-            painter.setBrush(QColor(0, 0, 0, self.bg_opacity))
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.drawRoundedRect(self.rect(), int(10 * self.size_scale), int(10 * self.size_scale))
+            bg_color = QColor(24, 24, 26, self.bg_opacity)
+            border_color = QColor(50, 50, 54, 200)
+
+        painter.setBrush(bg_color)
+        painter.setPen(border_color)
+        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), int(8 * self.size_scale), int(8 * self.size_scale))
+        self.draw_rack_screws(painter, self.width(), self.height())
         
         display_l = max(0.0, min(1.0, self.level_l))
         display_r = max(0.0, min(1.0, self.level_r))
+
+        readout_color = QColor(255, 255, 255)
+        if self.theme_id == 5:
+            readout_color = QColor(0, 212, 232)
+        elif self.theme_id == 6:
+            readout_color = QColor(51, 255, 102)
+        elif self.theme_id == 7:
+            readout_color = QColor(255, 176, 0)
 
         if self.is_horizontal:
             start_x = int(35 * self.size_scale)
@@ -581,15 +636,31 @@ class VuMeter(QWidget):
                 self.draw_scale_horizontal(painter, start_x, y_scale)
             self.draw_channel_horizontal(painter, display_r, self.peak_r, y_r, "R")
 
+            bars_end = start_x + int(self.num_leds * 13 * self.size_scale)
+            if self.show_live_db or self.show_peak_db:
+                font = painter.font()
+                font.setBold(True)
+                font.setPointSizeF(max(6.0, 7.5 * self.size_scale))
+                painter.setFont(font)
+                painter.setPen(readout_color)
+                text_x = bars_end + int(8 * self.size_scale)
+
+                if self.show_live_db:
+                    painter.drawText(text_x, y_l + int(8 * self.size_scale), f"L {self.format_db(display_l)}")
+                    painter.drawText(text_x, y_r + int(8 * self.size_scale), f"R {self.format_db(display_r)}")
+                if self.show_peak_db:
+                    pk_y_l = y_l + int(16 * self.size_scale) if self.show_live_db else y_l + int(10 * self.size_scale)
+                    pk_y_r = y_r + int(16 * self.size_scale) if self.show_live_db else y_r + int(10 * self.size_scale)
+                    painter.drawText(text_x, pk_y_l, f"Pk {self.format_db(self.peak_l)}")
+                    painter.drawText(text_x, pk_y_r, f"Pk {self.format_db(self.peak_r)}")
+
             if self.theme_id == 5:
                 painter.setPen(QColor(255, 255, 255, 45))
                 led_h = int(18 * self.size_scale)
-                end_x = start_x + int(self.num_leds * 13 * self.size_scale)
-
-                painter.drawLine(start_x, y_l + int(led_h * 0.25), end_x, y_l + int(led_h * 0.25))
-                painter.drawLine(start_x, y_l + int(led_h * 0.75), end_x, y_l + int(led_h * 0.75))
-                painter.drawLine(start_x, y_r + int(led_h * 0.25), end_x, y_r + int(led_h * 0.25))
-                painter.drawLine(start_x, y_r + int(led_h * 0.75), end_x, y_r + int(led_h * 0.75))
+                painter.drawLine(start_x, y_l + int(led_h * 0.25), bars_end, y_l + int(led_h * 0.25))
+                painter.drawLine(start_x, y_l + int(led_h * 0.75), bars_end, y_l + int(led_h * 0.75))
+                painter.drawLine(start_x, y_r + int(led_h * 0.25), bars_end, y_r + int(led_h * 0.25))
+                painter.drawLine(start_x, y_r + int(led_h * 0.75), bars_end, y_r + int(led_h * 0.75))
         else:
             col_w = int(34 * self.size_scale)
             x_l = int(14 * self.size_scale)
@@ -600,10 +671,27 @@ class VuMeter(QWidget):
             if self.fx_db_scale:
                 self.draw_scale_vertical(painter, x_scale, int(22 * self.size_scale))
 
+            top_y = int(22 * self.size_scale)
+            end_y = top_y + int(self.num_leds * 13 * self.size_scale)
+
+            if self.show_live_db or self.show_peak_db:
+                font = painter.font()
+                font.setBold(True)
+                font.setPointSizeF(max(6.0, 7.5 * self.size_scale))
+                painter.setFont(font)
+                painter.setPen(readout_color)
+
+                ry = end_y + int(10 * self.size_scale)
+                if self.show_live_db:
+                    painter.drawText(x_l, ry, self.format_db(display_l))
+                    painter.drawText(x_r, ry, self.format_db(display_r))
+                    ry += int(11 * self.size_scale)
+                if self.show_peak_db:
+                    painter.drawText(x_l, ry, f"Pk {self.format_db(self.peak_l)}")
+                    painter.drawText(x_r, ry, f"Pk {self.format_db(self.peak_r)}")
+
             if self.theme_id == 5:
                 painter.setPen(QColor(255, 255, 255, 45))
-                top_y = int(22 * self.size_scale)
-                end_y = top_y + int(self.num_leds * 13 * self.size_scale)
                 for x_col in (x_l, x_r):
                     painter.drawLine(x_col + int(col_w * 0.25), top_y, x_col + int(col_w * 0.25), end_y)
                     painter.drawLine(x_col + int(col_w * 0.75), top_y, x_col + int(col_w * 0.75), end_y)
@@ -758,7 +846,11 @@ class VuMeter(QWidget):
                     if is_red: base_color = QColor(233, 30, 99)
                     elif is_yellow: base_color = QColor(255, 107, 53)
                     else: base_color = QColor(255, 193, 7)
-                else:
+                elif self.theme_id == 6: # LCD Green
+                    base_color = QColor(51, 255, 102)
+                elif self.theme_id == 7: # LCD Amber
+                    base_color = QColor(255, 176, 0)
+                else: # Classic
                     if is_red: base_color = QColor(255, 50, 50)
                     elif is_yellow: base_color = QColor(255, 200, 50)
                     else: base_color = QColor(0, 255, 102)
@@ -898,7 +990,11 @@ class VuMeter(QWidget):
                     if is_red: base_color = QColor(233, 30, 99)
                     elif is_yellow: base_color = QColor(255, 107, 53)
                     else: base_color = QColor(255, 193, 7)
-                else:
+                elif self.theme_id == 6: # LCD Green
+                    base_color = QColor(51, 255, 102)
+                elif self.theme_id == 7: # LCD Amber
+                    base_color = QColor(255, 176, 0)
+                else: # Classic
                     if is_red: base_color = QColor(255, 50, 50)
                     elif is_yellow: base_color = QColor(255, 200, 50)
                     else: base_color = QColor(0, 255, 102)

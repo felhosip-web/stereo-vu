@@ -50,11 +50,13 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     private var themeId = 0
     private var peakMode = 0 // 0=white, 1=colored same as led, 2=amber fixed, 3=cyan fixed
 
-    // Visual Effects
+    // Visual Effects & Readouts
     private var fxGlow = true
     private var fxSheen = true
     private var fxGhost = true
     private var fxDbScale = true
+    private var showLiveDb = true
+    private var showPeakDb = true
 
     // LEDs
     private val paintGreen = Paint().apply { color = Color.parseColor("#00FF66") }
@@ -75,6 +77,9 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     private val paintChanLabel = Paint().apply { color = Color.WHITE; textSize = 28f; textAlign = Paint.Align.CENTER; isFakeBoldText = true }
     private val paintScaleTick = Paint().apply { color = Color.parseColor("#666666"); strokeWidth = 2f }
     private val paintScaleText = Paint().apply { color = Color.parseColor("#888888"); textSize = 16f }
+    private val paintReadout = Paint().apply { color = Color.WHITE; textSize = 14f; typeface = Typeface.MONOSPACE }
+    private val paintRackScrew = Paint().apply { color = Color.parseColor("#444444"); style = Paint.Style.STROKE; strokeWidth = 1.5f }
+    private val paintRackScrewFill = Paint().apply { color = Color.parseColor("#222222"); style = Paint.Style.FILL }
 
     private val colW = 70f
     private val ledH = 12f
@@ -240,6 +245,8 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         val oldLedCount = ledCount
         val oldHoriz = isHorizontal
         val oldDbScale = fxDbScale
+        val oldLiveDb = showLiveDb
+        val oldPeakDb = showPeakDb
         sizeScale = prefs.getFloat("size_scale", 1.0f)
         ledCount = prefs.getInt("led_count", 20)
         isHorizontal = prefs.getBoolean("horizontal", false)
@@ -248,6 +255,8 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         fxSheen = prefs.getBoolean("fx_sheen", true)
         fxGhost = prefs.getBoolean("fx_ghost", true)
         fxDbScale = prefs.getBoolean("fx_db_scale", true)
+        showLiveDb = prefs.getBoolean("show_live_db", true)
+        showPeakDb = prefs.getBoolean("show_peak_db", true)
 
         if (fxGlow) {
             setLayerType(LAYER_TYPE_SOFTWARE, null)
@@ -316,7 +325,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                    else if (prefs.getBoolean("colored_peak", false)) 1 else 0
         setBackgroundColor(Color.argb(opacity, 0, 0, 0))
         updateThemeColors()
-        if (oldScale != sizeScale || oldLedCount != ledCount || oldHoriz != isHorizontal || oldDbScale != fxDbScale) {
+        if (oldScale != sizeScale || oldLedCount != ledCount || oldHoriz != isHorizontal || oldDbScale != fxDbScale || oldLiveDb != showLiveDb || oldPeakDb != showPeakDb) {
             requestLayout()
             params?.let { windowManager?.updateViewLayout(this, it) }
         }
@@ -347,6 +356,18 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                 paintGreen.color = vfdCyan; paintYellow.color = vfdCyan; paintRed.color = vfdCyan
                 paintOffGreen.color = vfdDim; paintOffYellow.color = vfdDim; paintOffRed.color = vfdDim
             }
+            6 -> { // LCD Zöld (Retro LCD Green: #0A1A0A bg, #33FF66 active, #1A2E1A ghost)
+                val lcdGreen = Color.parseColor("#33FF66")
+                val lcdGhost = Color.parseColor("#1A2E1A")
+                paintGreen.color = lcdGreen; paintYellow.color = lcdGreen; paintRed.color = lcdGreen
+                paintOffGreen.color = lcdGhost; paintOffYellow.color = lcdGhost; paintOffRed.color = lcdGhost
+            }
+            7 -> { // LCD Borostyán (LCD Amber: #120A00 bg, #FFB000 active, #2E1B00 ghost)
+                val lcdAmber = Color.parseColor("#FFB000")
+                val lcdGhost = Color.parseColor("#2E1B00")
+                paintGreen.color = lcdAmber; paintYellow.color = lcdAmber; paintRed.color = lcdAmber
+                paintOffGreen.color = lcdGhost; paintOffYellow.color = lcdGhost; paintOffRed.color = lcdGhost
+            }
             else -> { // Classic
                 paintGreen.color = Color.parseColor("#00FF66"); paintYellow.color = Color.parseColor("#FFAA00"); paintRed.color = Color.parseColor("#FF2222")
                 paintOffGreen.color = Color.parseColor("#082010"); paintOffYellow.color = Color.parseColor("#1A1200"); paintOffRed.color = Color.parseColor("#1A0808")
@@ -367,13 +388,15 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     }
 
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
+        val extraReadoutW = if (showLiveDb || showPeakDb) 85f else 0f
+        val extraReadoutH = if (showLiveDb || showPeakDb) 36f else 0f
         if (isHorizontal) {
-            val baseW = 40f + ledCount * (ledH + ledGap) + 20f
+            val baseW = 40f + ledCount * (ledH + ledGap) + 20f + extraReadoutW
             val baseH = if (fxDbScale) (20f + colW + 16f + 20f + colW + 20f) else (20f + colW + 12f + colW + 20f)
             setMeasuredDimension((baseW * sizeScale).toInt(), (baseH * sizeScale).toInt())
         } else {
             val baseW = if (fxDbScale) (xScale + 32f) else (xR + colW + 16f)
-            val baseH = topY + ledCount * (ledH + ledGap) - ledGap + 10f
+            val baseH = topY + ledCount * (ledH + ledGap) - ledGap + 10f + extraReadoutH
             setMeasuredDimension((baseW * sizeScale).toInt(), (baseH * sizeScale).toInt())
         }
     }
@@ -392,23 +415,66 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         canvas.restore()
     }
     
+    private fun formatDb(level: Float): String {
+        val db = (level * 50f) - 50f
+        return if (db <= -49.5f) "-INF" else String.format(java.util.Locale.US, "%+.1f", db)
+    }
+
+    private fun drawRackScrews(canvas: Canvas, w: Float, h: Float) {
+        val r = 3.5f
+        val margin = 6f
+        val screwPositions = floatArrayOf(
+            margin, margin,
+            w - margin, margin,
+            margin, h - margin,
+            w - margin, h - margin
+        )
+        for (i in 0 until screwPositions.size step 2) {
+            val sx = screwPositions[i]
+            val sy = screwPositions[i + 1]
+            canvas.drawCircle(sx, sy, r, paintRackScrewFill)
+            canvas.drawCircle(sx, sy, r, paintRackScrew)
+            canvas.drawLine(sx - 2f, sy, sx + 2f, sy, paintRackScrew)
+        }
+    }
+
     private fun drawVertical(canvas: Canvas) {
+        val extraReadoutH = if (showLiveDb || showPeakDb) 36f else 0f
         val totalW = xScale + 32f
-        val totalH = topY + ledCount * (ledH + ledGap) - ledGap + 10f
+        val towerBottom = topY + ledCount * (ledH + ledGap) - ledGap
+        val totalH = towerBottom + 10f + extraReadoutH
         val bezelRect = RectF(0f, 0f, totalW, totalH)
-        val vfdBezel = if (themeId == 5) Paint().apply { color = Color.parseColor("#0A1215") } else paintBezel
-        val vfdBorder = if (themeId == 5) Paint().apply { color = Color.parseColor("#003840"); style = Paint.Style.STROKE; strokeWidth = 2f } else paintBezelBorder
+
+        val vfdBezel = when (themeId) {
+            5 -> Paint().apply { color = Color.parseColor("#0A1215") }
+            6 -> Paint().apply { color = Color.parseColor("#0A1A0A") }
+            7 -> Paint().apply { color = Color.parseColor("#120A00") }
+            else -> paintBezel
+        }
+        val vfdBorder = when (themeId) {
+            5 -> Paint().apply { color = Color.parseColor("#003840"); style = Paint.Style.STROKE; strokeWidth = 2f }
+            6 -> Paint().apply { color = Color.parseColor("#1A381A"); style = Paint.Style.STROKE; strokeWidth = 2f }
+            7 -> Paint().apply { color = Color.parseColor("#382200"); style = Paint.Style.STROKE; strokeWidth = 2f }
+            else -> paintBezelBorder
+        }
         canvas.drawRoundRect(bezelRect, 8f, 8f, vfdBezel)
         canvas.drawRoundRect(bezelRect, 8f, 8f, vfdBorder)
+        drawRackScrews(canvas, totalW, totalH)
 
         val grooveX = xL + colW + 2f
-        val vfdGroove = if (themeId == 5) Paint().apply { color = Color.parseColor("#040B0D") } else paintGroove
-        canvas.drawRoundRect(RectF(grooveX, topY - 4f, grooveX + 10f, totalH - 6f), 3f, 3f, vfdGroove)
+        val vfdGroove = when (themeId) {
+            5 -> Paint().apply { color = Color.parseColor("#040B0D") }
+            6 -> Paint().apply { color = Color.parseColor("#050F05") }
+            7 -> Paint().apply { color = Color.parseColor("#0A0600") }
+            else -> paintGroove
+        }
+        canvas.drawRoundRect(RectF(grooveX, topY - 4f, grooveX + 10f, towerBottom + 4f), 3f, 3f, vfdGroove)
 
-        if (themeId == 5) {
-            paintChanLabel.color = Color.parseColor("#66C0CC")
-        } else {
-            paintChanLabel.color = Color.WHITE
+        paintChanLabel.color = when (themeId) {
+            5 -> Color.parseColor("#66C0CC")
+            6 -> Color.parseColor("#33FF66")
+            7 -> Color.parseColor("#FFB000")
+            else -> Color.WHITE
         }
 
         canvas.drawText("L", xL + colW / 2f, topY - 8f, paintChanLabel)
@@ -420,13 +486,34 @@ class StereoVuView(context: Context) : FrameLayout(context) {
             drawScale(canvas, xScale, topY)
         }
 
+        // Readouts under each channel
+        if (showLiveDb || showPeakDb) {
+            paintReadout.color = when (themeId) {
+                5 -> Color.parseColor("#00D4E8")
+                6 -> Color.parseColor("#33FF66")
+                7 -> Color.parseColor("#FFB000")
+                else -> Color.WHITE
+            }
+            paintReadout.textAlign = Paint.Align.CENTER
+            var readoutY = towerBottom + 16f
+            if (showLiveDb) {
+                canvas.drawText(formatDb(levelL), xL + colW / 2f, readoutY, paintReadout)
+                canvas.drawText(formatDb(levelR), xR + colW / 2f, readoutY, paintReadout)
+                readoutY += 14f
+            }
+            if (showPeakDb) {
+                canvas.drawText("Pk " + formatDb(peakL), xL + colW / 2f, readoutY, paintReadout)
+                canvas.drawText("Pk " + formatDb(peakR), xR + colW / 2f, readoutY, paintReadout)
+            }
+        }
+
         if (themeId == 5) {
             val wirePaint = Paint().apply {
                 color = Color.argb(45, 255, 255, 255)
                 strokeWidth = 1f
             }
             val wireStart = topY - 4f
-            val wireEnd = totalH - 6f
+            val wireEnd = towerBottom + 4f
             canvas.drawLine(xL + colW * 0.3f, wireStart, xL + colW * 0.3f, wireEnd, wirePaint)
             canvas.drawLine(xL + colW * 0.7f, wireStart, xL + colW * 0.7f, wireEnd, wirePaint)
             canvas.drawLine(xR + colW * 0.3f, wireStart, xR + colW * 0.3f, wireEnd, wirePaint)
@@ -435,28 +522,47 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     }
 
     private fun drawHorizontal(canvas: Canvas) {
+        val extraReadoutW = if (showLiveDb || showPeakDb) 85f else 0f
         val startX = 40f
         val yL = 20f
         val yScale = yL + colW + 12f
         val yR = if (fxDbScale) (yScale + 16f) else (yL + colW + 12f)
         
-        val totalW = startX + ledCount * (ledH + ledGap) + 20f
+        val barsEnd = startX + ledCount * (ledH + ledGap)
+        val totalW = barsEnd + 20f + extraReadoutW
         val totalH = yR + colW + 16f
         
         val bezelRect = RectF(0f, 0f, totalW, totalH)
-        val vfdBezel = if (themeId == 5) Paint().apply { color = Color.parseColor("#0A1215") } else paintBezel
-        val vfdBorder = if (themeId == 5) Paint().apply { color = Color.parseColor("#003840"); style = Paint.Style.STROKE; strokeWidth = 2f } else paintBezelBorder
+        val vfdBezel = when (themeId) {
+            5 -> Paint().apply { color = Color.parseColor("#0A1215") }
+            6 -> Paint().apply { color = Color.parseColor("#0A1A0A") }
+            7 -> Paint().apply { color = Color.parseColor("#120A00") }
+            else -> paintBezel
+        }
+        val vfdBorder = when (themeId) {
+            5 -> Paint().apply { color = Color.parseColor("#003840"); style = Paint.Style.STROKE; strokeWidth = 2f }
+            6 -> Paint().apply { color = Color.parseColor("#1A381A"); style = Paint.Style.STROKE; strokeWidth = 2f }
+            7 -> Paint().apply { color = Color.parseColor("#382200"); style = Paint.Style.STROKE; strokeWidth = 2f }
+            else -> paintBezelBorder
+        }
         canvas.drawRoundRect(bezelRect, 8f, 8f, vfdBezel)
         canvas.drawRoundRect(bezelRect, 8f, 8f, vfdBorder)
+        drawRackScrews(canvas, totalW, totalH)
 
         val grooveY = yL + colW + 2f
-        val vfdGroove = if (themeId == 5) Paint().apply { color = Color.parseColor("#040B0D") } else paintGroove
-        canvas.drawRoundRect(RectF(startX - 4f, grooveY, totalW - 6f, grooveY + 8f), 3f, 3f, vfdGroove)
+        val vfdGroove = when (themeId) {
+            5 -> Paint().apply { color = Color.parseColor("#040B0D") }
+            6 -> Paint().apply { color = Color.parseColor("#050F05") }
+            7 -> Paint().apply { color = Color.parseColor("#0A0600") }
+            else -> paintGroove
+        }
+        canvas.drawRoundRect(RectF(startX - 4f, grooveY, barsEnd + 4f, grooveY + 8f), 3f, 3f, vfdGroove)
 
-        if (themeId == 5) {
-            paintChanLabel.color = Color.parseColor("#66C0CC")
-        } else {
-            paintChanLabel.color = Color.WHITE
+        paintChanLabel.color = when (themeId) {
+            5 -> Color.parseColor("#66C0CC")
+            6 -> Color.parseColor("#33FF66")
+            7 -> Color.parseColor("#FFB000")
+            else -> Color.WHITE
         }
 
         canvas.drawText("L", 16f, yL + colW / 2f + paintChanLabel.textSize / 3f, paintChanLabel)
@@ -466,6 +572,28 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         drawTowerHorizontal(canvas, startX, yR, levelR.coerceIn(0f, 1f), peakR, peakAlphaR)
         if (fxDbScale) {
             drawScaleHorizontal(canvas, startX, yScale)
+        }
+
+        // Live dB + Peak text on the right
+        if (showLiveDb || showPeakDb) {
+            val textX = barsEnd + 12f
+            paintReadout.color = when (themeId) {
+                5 -> Color.parseColor("#00D4E8")
+                6 -> Color.parseColor("#33FF66")
+                7 -> Color.parseColor("#FFB000")
+                else -> Color.WHITE
+            }
+            paintReadout.textAlign = Paint.Align.LEFT
+
+            if (showLiveDb) {
+                canvas.drawText("L " + formatDb(levelL), textX, yL + colW * 0.4f, paintReadout)
+                canvas.drawText("R " + formatDb(levelR), textX, yR + colW * 0.4f, paintReadout)
+            }
+            if (showPeakDb) {
+                val pkYOffset = if (showLiveDb) colW * 0.75f else colW * 0.5f
+                canvas.drawText("Pk " + formatDb(peakL), textX, yL + pkYOffset, paintReadout)
+                canvas.drawText("Pk " + formatDb(peakR), textX, yR + pkYOffset, paintReadout)
+            }
         }
 
         if (themeId == 5) {

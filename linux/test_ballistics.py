@@ -3,7 +3,6 @@ import numpy as np
 
 class TestBallisticsAndPeak(unittest.TestCase):
     def test_true_peak_intersample_interpolation(self):
-        # A test showing inter-sample interpolation detecting inter-sample peak
         s_arr = np.array([[0.2, 0.2], [0.9, 0.9], [0.3, 0.3]], dtype=np.float32)
         chan_l = s_arr[:, 0]
         mid_l = 0.5 * (chan_l[:-1] + chan_l[1:])
@@ -13,7 +12,6 @@ class TestBallisticsAndPeak(unittest.TestCase):
         self.assertAlmostEqual(peak_tp, 0.9, places=5)
 
     def test_bbc_ppm_stepped_release(self):
-        # Test that BBC PPM mode drops in discrete steps rather than pure continuous exponential
         level = 1.0
         target = 0.0
         timer = 0
@@ -26,7 +24,6 @@ class TestBallisticsAndPeak(unittest.TestCase):
                 timer = 0
             levels.append(level)
 
-        # Frame 0: 1.0, Frame 1: 1.0, Frame 2: drops, Frame 3: same, Frame 4: same, Frame 5: drops
         self.assertEqual(levels[0], 1.0)
         self.assertEqual(levels[1], 1.0)
         self.assertLess(levels[2], 1.0)
@@ -35,7 +32,6 @@ class TestBallisticsAndPeak(unittest.TestCase):
         self.assertLess(levels[5], levels[4])
 
     def test_peak_never_below_bar(self):
-        # Scenario 1: level rises above peak -> peak jumps with it
         peak = 0.5
         display_level = 0.8
         peak_never_below_bar = True
@@ -52,10 +48,9 @@ class TestBallisticsAndPeak(unittest.TestCase):
         self.assertEqual(peak, 0.8)
         self.assertEqual(peak_hold, 30)
 
-        # Scenario 2: level drops -> peak holds, then decays, but never drops below level
         display_level = 0.7
-        peak_decay_rate = 0.5 # fast decay for test
-        peak_hold = 0 # hold expired
+        peak_decay_rate = 0.5
+        peak_hold = 0
 
         if display_level >= peak:
             peak = display_level
@@ -70,8 +65,17 @@ class TestBallisticsAndPeak(unittest.TestCase):
             if peak < display_level:
                 peak = display_level
 
-        # peak would have been 0.8 * 0.5 = 0.4, but clamped to display_level (0.7)
         self.assertEqual(peak, 0.7)
+
+    def test_db_formatting(self):
+        def format_db(level):
+            db = (level * 50.0) - 50.0
+            return "-INF" if db <= -49.5 else f"{db:+.1f}"
+
+        self.assertEqual(format_db(1.0), "+0.0")
+        self.assertEqual(format_db(0.0), "-INF")
+        self.assertEqual(format_db(0.5), "-25.0")
+        self.assertEqual(format_db(0.8), "-10.0")
 
 if __name__ == '__main__':
     unittest.main()
