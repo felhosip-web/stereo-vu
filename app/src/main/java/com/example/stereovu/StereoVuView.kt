@@ -103,6 +103,11 @@ class StereoVuView(context: Context) : FrameLayout(context) {
 
         // 60fps decay + peak fade loop - EZ MOZGATJA A KIJELZÉST
         postDelayed(object : Runnable {
+            /**
+             * Advances ballistics and peak hold/fade, decays targets, and schedules the next update.
+             * BBC PPM release steps every third update without a rise. When enabled, peaks are
+             * kept at or above the displayed bars. The next update is requested after 16 ms.
+             */
             override fun run() {
                 if (mode == 1 || mode == 4) {
                     // 1: Analog VU (~300 ms integration feel, spring/damp)
@@ -240,6 +245,12 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         }
     }
 
+    /**
+     * Applies saved ballistics and appearance preferences and schedules a redraw.
+     *
+     * Falls back to colored_peak when peak_mode is absent. Requests layout and updates the
+     * overlay layout when scale, LED count, orientation, scale labels, or readout visibility changes.
+     */
     private fun loadPrefs() {
         val oldScale = sizeScale
         val oldLedCount = ledCount
@@ -332,6 +343,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         invalidate()
     }
 
+    /** Sets active and inactive LED colors for the selected theme, using Classic for unknown IDs. */
     private fun updateThemeColors() {
         when (themeId) {
             1 -> { // Cyberpunk
@@ -387,6 +399,12 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         targetR = max(targetR, toLevel(rawR))
     }
 
+    /**
+     * Sets the scaled meter dimensions, reserving space for enabled dB readouts.
+     *
+     * Dimensions follow the configured LED count, orientation, and scale labels rather than
+     * the supplied measure constraints.
+     */
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val extraReadoutW = if (showLiveDb || showPeakDb) 85f else 0f
         val extraReadoutH = if (showLiveDb || showPeakDb) 36f else 0f
@@ -415,11 +433,18 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         canvas.restore()
     }
     
+    /**
+     * Formats a display level using dB = level × 50 − 50, without clamping the input.
+     *
+     * Returns "-INF" at or below −49.5 dB; otherwise returns a signed value with one decimal
+     * place and a US decimal separator. This accepts the mapped display level, not amplitude.
+     */
     private fun formatDb(level: Float): String {
         val db = (level * 50f) - 50f
         return if (db <= -49.5f) "-INF" else String.format(java.util.Locale.US, "%+.1f", db)
     }
 
+    /** Draws four corner screws within [w] by [h] bounds in unscaled meter coordinates. */
     private fun drawRackScrews(canvas: Canvas, w: Float, h: Float) {
         val r = 3.5f
         val margin = 6f
@@ -438,6 +463,11 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         }
     }
 
+    /**
+     * Draws vertical channels, themed housing, optional scale, and enabled readouts below the bars.
+     *
+     * Coordinates are unscaled; the caller applies the display scale to [canvas].
+     */
     private fun drawVertical(canvas: Canvas) {
         val extraReadoutH = if (showLiveDb || showPeakDb) 36f else 0f
         val totalW = xScale + 32f
@@ -521,6 +551,11 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         }
     }
 
+    /**
+     * Draws horizontal channels, themed housing, optional scale, and enabled readouts to the right.
+     *
+     * Coordinates are unscaled; the caller applies the display scale to [canvas].
+     */
     private fun drawHorizontal(canvas: Canvas) {
         val extraReadoutW = if (showLiveDb || showPeakDb) 85f else 0f
         val startX = 40f

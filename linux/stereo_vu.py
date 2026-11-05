@@ -11,6 +11,10 @@ from PyQt6.QtGui import QPainter, QColor, QAction
 
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
+        """Build the settings dialog from saved preferences.
+
+        Audio device query failures leave a default-device choice available.
+        """
         super().__init__(parent)
         self.setWindowTitle("Stereo VU Beállítások")
         self.settings = QSettings("StereoVU", "LinuxApp")
@@ -250,6 +254,10 @@ class SettingsDialog(QDialog):
         main_layout.addLayout(btn_layout)
 
     def save_settings(self):
+        """Save the controls to QSettings and accept the dialog.
+
+        Peak hold is stored in milliseconds under both current and legacy keys.
+        """
         self.settings.setValue("input_device", self.device_combo.currentData())
         self.settings.setValue("detection_mode", self.detection_combo.currentIndex())
         self.settings.setValue("rms_window_ms", self.rms_window_slider.value())
@@ -280,6 +288,7 @@ class SettingsDialog(QDialog):
 
 class VuMeter(QWidget):
     def __init__(self):
+        """Initialize the floating meter, start its 16 ms update timer, and attempt audio capture."""
         super().__init__()
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint | 
@@ -361,6 +370,12 @@ class VuMeter(QWidget):
                     print(f"Failed to start fallback audio stream: {e2}")
 
     def load_settings(self):
+        """Apply saved ballistics and appearance settings, resize, and request repainting.
+
+        Reinitialize RMS history if the window size changes. Peak hold values at or
+        below 180 are treated as legacy frame counts and converted to milliseconds;
+        the hold countdown uses nominal 16 ms updates.
+        """
         self.mode = self.settings.value("mode", 0, type=int)
         self.num_leds = self.settings.value("led_count", 20, type=int)
         self.theme_id = self.settings.value("theme", 0, type=int)
@@ -438,6 +453,15 @@ class VuMeter(QWidget):
         self.update()
 
     def audio_callback(self, indata, frames, time, status):
+        """Raise channel targets from a block of normalized stereo audio samples.
+
+        indata contains left/right columns, with frames indicating the block length.
+        Peak detection uses sample magnitudes; True Peak mode additionally checks
+        linear quarter and midpoint samples within this block. RMS detection uses
+        the populated portion of the sliding window instead. Gain-adjusted levels
+        map from -50 to 0 dB into [0, 1] and only raise existing targets.
+        Callback timing and status arguments are unused.
+        """
         # Peak detection: true peak of the current audio buffer (max absolute sample)
         # Fast, direct, responsive
         peak_l = float(np.max(np.abs(indata[:, 0]))) if frames > 0 else 0.0
@@ -502,6 +526,13 @@ class VuMeter(QWidget):
         self.target_r = min(1.0, max(self.target_r, new_target_r))
 
     def update_meter(self):
+        """Advance ballistics, peak hold/decay, and target release, then request repainting.
+
+        BBC PPM release steps every third consecutive update without a rise.
+        Peak hold resets when the displayed level meets or exceeds the peak.
+        When enabled, peak_never_below_bar clamps decaying peaks to the displayed
+        levels. Hold countdowns and decay advance once per call.
+        """
         if self.mode == 1 or self.mode == 4:
             # 1: Analog VU, 4: Classic VU (spring/damp 2nd-order ballistics)
             self.vel_l += (self.target_l - self.level_l) * self.analog_spring
@@ -580,10 +611,19 @@ class VuMeter(QWidget):
         self.update()
 
     def format_db(self, level):
+        """Format a mapped display level as signed dB with one decimal place.
+
+        Uses dB = level * 50 - 50 without clamping; returns "-INF" at or below
+        -49.5 dB. The input is the display level, not a linear audio amplitude.
+        """
         db = (level * 50.0) - 50.0
         return "-INF" if db <= -49.5 else f"{db:+.1f}"
 
     def draw_rack_screws(self, painter, w, h):
+        """Draw four corner screws within pixel bounds w by h, scaled by size_scale.
+
+        Leaves the painter pen and brush set to the screw colors.
+        """
         r = int(3 * self.size_scale)
         m = int(5 * self.size_scale)
         pts = [(m, m), (w - m, m), (m, h - m), (w - m, h - m)]
@@ -594,6 +634,7 @@ class VuMeter(QWidget):
             painter.drawLine(px - r + 1, py, px + r - 1, py)
 
     def paintEvent(self, event):
+        """Paint the themed housing, stereo bars, optional scale, and enabled dB readouts."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
@@ -750,6 +791,11 @@ class VuMeter(QWidget):
             painter.drawText(x + int(6 * self.size_scale), y + int(4 * self.size_scale), label)
 
     def draw_channel_horizontal(self, painter, level, peak, y_offset, label):
+        """Draw a labeled horizontal channel using mapped level and peak values in [0, 1].
+
+        y_offset is the bar top in widget pixels. Geometry follows size_scale;
+        the painter pen, brush, and font are modified.
+        """
         if self.theme_id == 5:
             painter.setPen(QColor(102, 192, 204))
         else:
@@ -893,6 +939,12 @@ class VuMeter(QWidget):
                         painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
 
     def draw_channel_vertical(self, painter, level, peak, x_offset, col_w, label):
+        """Draw a labeled vertical channel using mapped level and peak values in [0, 1].
+
+        x_offset and col_w are the column left and width in widget pixels.
+        Other geometry follows size_scale; the painter pen, brush, and font
+        are modified.
+        """
         if self.theme_id == 5:
             painter.setPen(QColor(102, 192, 204))
         else:

@@ -25,6 +25,7 @@ class MainActivity : Activity() {
     private var mediaProjectionManager: MediaProjectionManager? = null
     private lateinit var prefs: SharedPreferences
 
+    /** Builds the settings controls with preference updates and overlay start/stop actions. */
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("StereoVuPrefs", Context.MODE_PRIVATE)
