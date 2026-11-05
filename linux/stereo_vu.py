@@ -11,10 +11,6 @@ from PyQt6.QtGui import QPainter, QColor, QAction
 
 class SettingsDialog(QDialog):
     def __init__(self, parent=None):
-        """Build the settings dialog from saved preferences.
-
-        Audio device query failures leave a default-device choice available.
-        """
         super().__init__(parent)
         self.setWindowTitle("Stereo VU Beállítások")
         self.settings = QSettings("StereoVU", "LinuxApp")
@@ -183,6 +179,30 @@ class SettingsDialog(QDialog):
             self.peak_combo.setCurrentIndex(1 if old_colored else 0)
         layout3.addRow("Peak LED stílusa:", self.peak_combo)
 
+        # LCD testreszabás
+        lcd_header = QLabel("--- LCD Testreszabás (LCD Settings) ---")
+        lcd_header.setStyleSheet("color: #33FF66; font-weight: bold; margin-top: 10px;")
+        layout3.addRow(lcd_header)
+
+        self.lcd_ghost_slider = QSlider(Qt.Orientation.Horizontal)
+        self.lcd_ghost_slider.setRange(0, 100)
+        self.lcd_ghost_slider.setValue(int(self.settings.value("lcd_ghost_strength", 0.55, type=float) * 100))
+        layout3.addRow("Ghost erősség (0-100%):", self.lcd_ghost_slider)
+
+        self.lcd_contrast_slider = QSlider(Qt.Orientation.Horizontal)
+        self.lcd_contrast_slider.setRange(20, 100)
+        self.lcd_contrast_slider.setValue(int(self.settings.value("lcd_contrast", 0.80, type=float) * 100))
+        layout3.addRow("LCD Kontraszt (20-100%):", self.lcd_contrast_slider)
+
+        self.lcd_gap_slider = QSlider(Qt.Orientation.Horizontal)
+        self.lcd_gap_slider.setRange(1, 6)
+        self.lcd_gap_slider.setValue(self.settings.value("lcd_segment_gap", 2, type=int))
+        layout3.addRow("Szegmens résméret (1-6 px):", self.lcd_gap_slider)
+
+        self.lcd_7seg_check = QCheckBox("Bekapcsolva")
+        self.lcd_7seg_check.setChecked(self.settings.value("lcd_seven_segment", True, type=bool))
+        layout3.addRow("7-szegmenses számjegyek:", self.lcd_7seg_check)
+
         self.tabs.addTab(tab3, "Megjelenés & Elrendezés")
 
         # -------------------------------------------------------------
@@ -254,10 +274,6 @@ class SettingsDialog(QDialog):
         main_layout.addLayout(btn_layout)
 
     def save_settings(self):
-        """Save the controls to QSettings and accept the dialog.
-
-        Peak hold is stored in milliseconds under both current and legacy keys.
-        """
         self.settings.setValue("input_device", self.device_combo.currentData())
         self.settings.setValue("detection_mode", self.detection_combo.currentIndex())
         self.settings.setValue("rms_window_ms", self.rms_window_slider.value())
@@ -284,11 +300,14 @@ class SettingsDialog(QDialog):
         self.settings.setValue("fx_db_scale", self.fx_db_scale_check.isChecked())
         self.settings.setValue("show_live_db", self.show_live_db_check.isChecked())
         self.settings.setValue("show_peak_db", self.show_peak_db_check.isChecked())
+        self.settings.setValue("lcd_ghost_strength", self.lcd_ghost_slider.value() / 100.0)
+        self.settings.setValue("lcd_contrast", self.lcd_contrast_slider.value() / 100.0)
+        self.settings.setValue("lcd_segment_gap", self.lcd_gap_slider.value())
+        self.settings.setValue("lcd_seven_segment", self.lcd_7seg_check.isChecked())
         self.accept()
 
 class VuMeter(QWidget):
     def __init__(self):
-        """Initialize the floating meter, start its 16 ms update timer, and attempt audio capture."""
         super().__init__()
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint | 
@@ -370,12 +389,6 @@ class VuMeter(QWidget):
                     print(f"Failed to start fallback audio stream: {e2}")
 
     def load_settings(self):
-        """Apply saved ballistics and appearance settings, resize, and request repainting.
-
-        Reinitialize RMS history if the window size changes. Peak hold values at or
-        below 180 are treated as legacy frame counts and converted to milliseconds;
-        the hold countdown uses nominal 16 ms updates.
-        """
         self.mode = self.settings.value("mode", 0, type=int)
         self.num_leds = self.settings.value("led_count", 20, type=int)
         self.theme_id = self.settings.value("theme", 0, type=int)
@@ -438,9 +451,13 @@ class VuMeter(QWidget):
         self.fx_db_scale = self.settings.value("fx_db_scale", True, type=bool)
         self.show_live_db = self.settings.value("show_live_db", True, type=bool)
         self.show_peak_db = self.settings.value("show_peak_db", True, type=bool)
+        self.lcd_ghost_strength = self.settings.value("lcd_ghost_strength", 0.55, type=float)
+        self.lcd_contrast = self.settings.value("lcd_contrast", 0.80, type=float)
+        self.lcd_segment_gap = self.settings.value("lcd_segment_gap", 2, type=int)
+        self.lcd_seven_segment = self.settings.value("lcd_seven_segment", True, type=bool)
         
-        extra_readout_w = 65 if (self.show_live_db or self.show_peak_db) else 0
-        extra_readout_h = 28 if (self.show_live_db or self.show_peak_db) else 0
+        extra_readout_w = 85 if (self.show_live_db or self.show_peak_db) else 0
+        extra_readout_h = 30 if (self.show_live_db or self.show_peak_db) else 0
 
         if self.is_horizontal:
             base_w = 40 + self.num_leds * 13 + (15 if self.fx_db_scale else 0) + extra_readout_w
@@ -453,15 +470,6 @@ class VuMeter(QWidget):
         self.update()
 
     def audio_callback(self, indata, frames, time, status):
-        """Raise channel targets from a block of normalized stereo audio samples.
-
-        indata contains left/right columns, with frames indicating the block length.
-        Peak detection uses sample magnitudes; True Peak mode additionally checks
-        linear quarter and midpoint samples within this block. RMS detection uses
-        the populated portion of the sliding window instead. Gain-adjusted levels
-        map from -50 to 0 dB into [0, 1] and only raise existing targets.
-        Callback timing and status arguments are unused.
-        """
         # Peak detection: true peak of the current audio buffer (max absolute sample)
         # Fast, direct, responsive
         peak_l = float(np.max(np.abs(indata[:, 0]))) if frames > 0 else 0.0
@@ -526,13 +534,6 @@ class VuMeter(QWidget):
         self.target_r = min(1.0, max(self.target_r, new_target_r))
 
     def update_meter(self):
-        """Advance ballistics, peak hold/decay, and target release, then request repainting.
-
-        BBC PPM release steps every third consecutive update without a rise.
-        Peak hold resets when the displayed level meets or exceeds the peak.
-        When enabled, peak_never_below_bar clamps decaying peaks to the displayed
-        levels. Hold countdowns and decay advance once per call.
-        """
         if self.mode == 1 or self.mode == 4:
             # 1: Analog VU, 4: Classic VU (spring/damp 2nd-order ballistics)
             self.vel_l += (self.target_l - self.level_l) * self.analog_spring
@@ -611,19 +612,10 @@ class VuMeter(QWidget):
         self.update()
 
     def format_db(self, level):
-        """Format a mapped display level as signed dB with one decimal place.
-
-        Uses dB = level * 50 - 50 without clamping; returns "-INF" at or below
-        -49.5 dB. The input is the display level, not a linear audio amplitude.
-        """
         db = (level * 50.0) - 50.0
         return "-INF" if db <= -49.5 else f"{db:+.1f}"
 
     def draw_rack_screws(self, painter, w, h):
-        """Draw four corner screws within pixel bounds w by h, scaled by size_scale.
-
-        Leaves the painter pen and brush set to the screw colors.
-        """
         r = int(3 * self.size_scale)
         m = int(5 * self.size_scale)
         pts = [(m, m), (w - m, m), (m, h - m), (w - m, h - m)]
@@ -633,8 +625,49 @@ class VuMeter(QWidget):
             painter.drawEllipse(px - r, py - r, r * 2, r * 2)
             painter.drawLine(px - r + 1, py, px + r - 1, py)
 
+    def draw_7segment_char(self, painter, char, x, y, w, h):
+        t = max(1.5, w * 0.18)
+        half_h = h / 2.0
+        segs_map = {
+            '0': (True, True, True, True, True, True, False),
+            '1': (False, True, True, False, False, False, False),
+            '2': (True, True, False, True, True, False, True),
+            '3': (True, True, True, True, False, False, True),
+            '4': (False, True, True, False, False, True, True),
+            '5': (True, False, True, True, False, True, True),
+            '6': (True, False, True, True, True, True, True),
+            '7': (True, True, True, False, False, False, False),
+            '8': (True, True, True, True, True, True, True),
+            '9': (True, True, True, True, False, True, True),
+            '-': (False, False, False, False, False, False, True),
+            'P': (True, True, False, False, True, True, True),
+            'p': (True, True, False, False, True, True, True),
+            'k': (False, True, True, False, True, True, True),
+            'K': (False, True, True, False, True, True, True),
+            'L': (False, False, False, True, True, True, False),
+            'R': (True, True, False, False, True, True, True),
+        }
+        if char == '.':
+            painter.drawRect(int(x + w * 0.2), int(y + h - t * 1.5), int(t * 1.5), int(t * 1.5))
+            return
+        segs = segs_map.get(char, (False,) * 7)
+        if segs[0]: painter.drawRect(int(x + t), int(y), int(w - 2 * t), int(t))
+        if segs[1]: painter.drawRect(int(x + w - t), int(y + t), int(t), int(half_h - t))
+        if segs[2]: painter.drawRect(int(x + w - t), int(y + half_h), int(t), int(h - half_h - t))
+        if segs[3]: painter.drawRect(int(x + t), int(y + h - t), int(w - 2 * t), int(t))
+        if segs[4]: painter.drawRect(int(x), int(y + half_h), int(t), int(h - half_h - t))
+        if segs[5]: painter.drawRect(int(x), int(y + t), int(t), int(half_h - t))
+        if segs[6]: painter.drawRect(int(x + t), int(y + half_h - t / 2.0), int(w - 2 * t), int(t))
+
+    def draw_7segment_string(self, painter, text, x, y, cw, ch, sp):
+        cur_x = x
+        for c in text:
+            char_w = cw * 0.5 if (c == '.' or c == ' ') else cw
+            if c != ' ':
+                self.draw_7segment_char(painter, c, cur_x, y, char_w, ch)
+            cur_x += char_w + sp
+
     def paintEvent(self, event):
-        """Paint the themed housing, stereo bars, optional scale, and enabled dB readouts."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
@@ -663,9 +696,9 @@ class VuMeter(QWidget):
         if self.theme_id == 5:
             readout_color = QColor(0, 212, 232)
         elif self.theme_id == 6:
-            readout_color = QColor(51, 255, 102)
+            readout_color = QColor(51, 255, 102, int(255 * self.lcd_contrast))
         elif self.theme_id == 7:
-            readout_color = QColor(255, 176, 0)
+            readout_color = QColor(255, 176, 0, int(255 * self.lcd_contrast))
 
         if self.is_horizontal:
             start_x = int(35 * self.size_scale)
@@ -679,21 +712,37 @@ class VuMeter(QWidget):
 
             bars_end = start_x + int(self.num_leds * 13 * self.size_scale)
             if self.show_live_db or self.show_peak_db:
-                font = painter.font()
-                font.setBold(True)
-                font.setPointSizeF(max(6.0, 7.5 * self.size_scale))
-                painter.setFont(font)
-                painter.setPen(readout_color)
-                text_x = bars_end + int(8 * self.size_scale)
+                text_x = bars_end + int(14 * self.size_scale)
+                use_7seg = (self.theme_id in (6, 7)) and self.lcd_seven_segment
 
-                if self.show_live_db:
-                    painter.drawText(text_x, y_l + int(8 * self.size_scale), f"L {self.format_db(display_l)}")
-                    painter.drawText(text_x, y_r + int(8 * self.size_scale), f"R {self.format_db(display_r)}")
-                if self.show_peak_db:
-                    pk_y_l = y_l + int(16 * self.size_scale) if self.show_live_db else y_l + int(10 * self.size_scale)
-                    pk_y_r = y_r + int(16 * self.size_scale) if self.show_live_db else y_r + int(10 * self.size_scale)
-                    painter.drawText(text_x, pk_y_l, f"Pk {self.format_db(self.peak_l)}")
-                    painter.drawText(text_x, pk_y_r, f"Pk {self.format_db(self.peak_r)}")
+                if use_7seg:
+                    painter.setBrush(readout_color)
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    cw = 6.0 * self.size_scale
+                    ch = 10.0 * self.size_scale
+                    sp = 1.6 * self.size_scale
+                    if self.show_live_db:
+                        self.draw_7segment_string(painter, f"L {self.format_db(display_l)}", text_x, y_l + int(1 * self.size_scale), cw, ch, sp)
+                        self.draw_7segment_string(painter, f"R {self.format_db(display_r)}", text_x, y_r + int(1 * self.size_scale), cw, ch, sp)
+                    if self.show_peak_db:
+                        pk_y_l = y_l + int(13 * self.size_scale) if self.show_live_db else y_l + int(4 * self.size_scale)
+                        pk_y_r = y_r + int(13 * self.size_scale) if self.show_live_db else y_r + int(4 * self.size_scale)
+                        self.draw_7segment_string(painter, f"Pk {self.format_db(self.peak_l)}", text_x, pk_y_l, cw, ch, sp)
+                        self.draw_7segment_string(painter, f"Pk {self.format_db(self.peak_r)}", text_x, pk_y_r, cw, ch, sp)
+                else:
+                    font = painter.font()
+                    font.setBold(True)
+                    font.setPointSizeF(max(6.0, 7.5 * self.size_scale))
+                    painter.setFont(font)
+                    painter.setPen(readout_color)
+                    if self.show_live_db:
+                        painter.drawText(text_x, y_l + int(8 * self.size_scale), f"L {self.format_db(display_l)}")
+                        painter.drawText(text_x, y_r + int(8 * self.size_scale), f"R {self.format_db(display_r)}")
+                    if self.show_peak_db:
+                        pk_y_l = y_l + int(16 * self.size_scale) if self.show_live_db else y_l + int(10 * self.size_scale)
+                        pk_y_r = y_r + int(16 * self.size_scale) if self.show_live_db else y_r + int(10 * self.size_scale)
+                        painter.drawText(text_x, pk_y_l, f"Pk {self.format_db(self.peak_l)}")
+                        painter.drawText(text_x, pk_y_r, f"Pk {self.format_db(self.peak_r)}")
 
             if self.theme_id == 5:
                 painter.setPen(QColor(255, 255, 255, 45))
@@ -716,20 +765,35 @@ class VuMeter(QWidget):
             end_y = top_y + int(self.num_leds * 13 * self.size_scale)
 
             if self.show_live_db or self.show_peak_db:
-                font = painter.font()
-                font.setBold(True)
-                font.setPointSizeF(max(6.0, 7.5 * self.size_scale))
-                painter.setFont(font)
-                painter.setPen(readout_color)
-
+                use_7seg = (self.theme_id in (6, 7)) and self.lcd_seven_segment
                 ry = end_y + int(10 * self.size_scale)
-                if self.show_live_db:
-                    painter.drawText(x_l, ry, self.format_db(display_l))
-                    painter.drawText(x_r, ry, self.format_db(display_r))
-                    ry += int(11 * self.size_scale)
-                if self.show_peak_db:
-                    painter.drawText(x_l, ry, f"Pk {self.format_db(self.peak_l)}")
-                    painter.drawText(x_r, ry, f"Pk {self.format_db(self.peak_r)}")
+
+                if use_7seg:
+                    painter.setBrush(readout_color)
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    cw = 6.0 * self.size_scale
+                    ch = 10.0 * self.size_scale
+                    sp = 1.6 * self.size_scale
+                    if self.show_live_db:
+                        self.draw_7segment_string(painter, self.format_db(display_l), x_l, ry - int(8 * self.size_scale), cw, ch, sp)
+                        self.draw_7segment_string(painter, self.format_db(display_r), x_r, ry - int(8 * self.size_scale), cw, ch, sp)
+                        ry += int(13 * self.size_scale)
+                    if self.show_peak_db:
+                        self.draw_7segment_string(painter, f"Pk {self.format_db(self.peak_l)}", x_l, ry - int(8 * self.size_scale), cw, ch, sp)
+                        self.draw_7segment_string(painter, f"Pk {self.format_db(self.peak_r)}", x_r, ry - int(8 * self.size_scale), cw, ch, sp)
+                else:
+                    font = painter.font()
+                    font.setBold(True)
+                    font.setPointSizeF(max(6.0, 7.5 * self.size_scale))
+                    painter.setFont(font)
+                    painter.setPen(readout_color)
+                    if self.show_live_db:
+                        painter.drawText(x_l, ry, self.format_db(display_l))
+                        painter.drawText(x_r, ry, self.format_db(display_r))
+                        ry += int(11 * self.size_scale)
+                    if self.show_peak_db:
+                        painter.drawText(x_l, ry, f"Pk {self.format_db(self.peak_l)}")
+                        painter.drawText(x_r, ry, f"Pk {self.format_db(self.peak_r)}")
 
             if self.theme_id == 5:
                 painter.setPen(QColor(255, 255, 255, 45))
@@ -791,11 +855,6 @@ class VuMeter(QWidget):
             painter.drawText(x + int(6 * self.size_scale), y + int(4 * self.size_scale), label)
 
     def draw_channel_horizontal(self, painter, level, peak, y_offset, label):
-        """Draw a labeled horizontal channel using mapped level and peak values in [0, 1].
-
-        y_offset is the bar top in widget pixels. Geometry follows size_scale;
-        the painter pen, brush, and font are modified.
-        """
         if self.theme_id == 5:
             painter.setPen(QColor(102, 192, 204))
         else:
@@ -939,12 +998,6 @@ class VuMeter(QWidget):
                         painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
 
     def draw_channel_vertical(self, painter, level, peak, x_offset, col_w, label):
-        """Draw a labeled vertical channel using mapped level and peak values in [0, 1].
-
-        x_offset and col_w are the column left and width in widget pixels.
-        Other geometry follows size_scale; the painter pen, brush, and font
-        are modified.
-        """
         if self.theme_id == 5:
             painter.setPen(QColor(102, 192, 204))
         else:

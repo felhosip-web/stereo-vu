@@ -57,6 +57,10 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     private var fxDbScale = true
     private var showLiveDb = true
     private var showPeakDb = true
+    private var lcdGhostStrength = 0.55f
+    private var lcdContrast = 0.80f
+    private var lcdSegmentGap = 2f
+    private var lcdSevenSegment = true
 
     // LEDs
     private val paintGreen = Paint().apply { color = Color.parseColor("#00FF66") }
@@ -103,11 +107,6 @@ class StereoVuView(context: Context) : FrameLayout(context) {
 
         // 60fps decay + peak fade loop - EZ MOZGATJA A KIJELZÉST
         postDelayed(object : Runnable {
-            /**
-             * Advances ballistics and peak hold/fade, decays targets, and schedules the next update.
-             * BBC PPM release steps every third update without a rise. When enabled, peaks are
-             * kept at or above the displayed bars. The next update is requested after 16 ms.
-             */
             override fun run() {
                 if (mode == 1 || mode == 4) {
                     // 1: Analog VU (~300 ms integration feel, spring/damp)
@@ -245,12 +244,6 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         }
     }
 
-    /**
-     * Applies saved ballistics and appearance preferences and schedules a redraw.
-     *
-     * Falls back to colored_peak when peak_mode is absent. Requests layout and updates the
-     * overlay layout when scale, LED count, orientation, scale labels, or readout visibility changes.
-     */
     private fun loadPrefs() {
         val oldScale = sizeScale
         val oldLedCount = ledCount
@@ -258,6 +251,8 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         val oldDbScale = fxDbScale
         val oldLiveDb = showLiveDb
         val oldPeakDb = showPeakDb
+        val oldGap = lcdSegmentGap
+        val oldSevenSeg = lcdSevenSegment
         sizeScale = prefs.getFloat("size_scale", 1.0f)
         ledCount = prefs.getInt("led_count", 20)
         isHorizontal = prefs.getBoolean("horizontal", false)
@@ -268,6 +263,10 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         fxDbScale = prefs.getBoolean("fx_db_scale", true)
         showLiveDb = prefs.getBoolean("show_live_db", true)
         showPeakDb = prefs.getBoolean("show_peak_db", true)
+        lcdGhostStrength = prefs.getFloat("lcd_ghost_strength", 0.55f)
+        lcdContrast = prefs.getFloat("lcd_contrast", 0.80f)
+        lcdSegmentGap = prefs.getInt("lcd_segment_gap", 2).toFloat()
+        lcdSevenSegment = prefs.getBoolean("lcd_seven_segment", true)
 
         if (fxGlow) {
             setLayerType(LAYER_TYPE_SOFTWARE, null)
@@ -336,14 +335,13 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                    else if (prefs.getBoolean("colored_peak", false)) 1 else 0
         setBackgroundColor(Color.argb(opacity, 0, 0, 0))
         updateThemeColors()
-        if (oldScale != sizeScale || oldLedCount != ledCount || oldHoriz != isHorizontal || oldDbScale != fxDbScale || oldLiveDb != showLiveDb || oldPeakDb != showPeakDb) {
+        if (oldScale != sizeScale || oldLedCount != ledCount || oldHoriz != isHorizontal || oldDbScale != fxDbScale || oldLiveDb != showLiveDb || oldPeakDb != showPeakDb || oldGap != lcdSegmentGap || oldSevenSeg != lcdSevenSegment) {
             requestLayout()
             params?.let { windowManager?.updateViewLayout(this, it) }
         }
         invalidate()
     }
 
-    /** Sets active and inactive LED colors for the selected theme, using Classic for unknown IDs. */
     private fun updateThemeColors() {
         when (themeId) {
             1 -> { // Cyberpunk
@@ -369,14 +367,18 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                 paintOffGreen.color = vfdDim; paintOffYellow.color = vfdDim; paintOffRed.color = vfdDim
             }
             6 -> { // LCD Zöld (Retro LCD Green: #0A1A0A bg, #33FF66 active, #1A2E1A ghost)
-                val lcdGreen = Color.parseColor("#33FF66")
-                val lcdGhost = Color.parseColor("#1A2E1A")
+                val activeAlpha = (255 * lcdContrast.coerceIn(0.2f, 1f)).toInt()
+                val ghostAlpha = (255 * lcdGhostStrength.coerceIn(0f, 1f)).toInt()
+                val lcdGreen = Color.argb(activeAlpha, 0x33, 0xFF, 0x66)
+                val lcdGhost = Color.argb(ghostAlpha, 0x2A, 0x5E, 0x2A)
                 paintGreen.color = lcdGreen; paintYellow.color = lcdGreen; paintRed.color = lcdGreen
                 paintOffGreen.color = lcdGhost; paintOffYellow.color = lcdGhost; paintOffRed.color = lcdGhost
             }
             7 -> { // LCD Borostyán (LCD Amber: #120A00 bg, #FFB000 active, #2E1B00 ghost)
-                val lcdAmber = Color.parseColor("#FFB000")
-                val lcdGhost = Color.parseColor("#2E1B00")
+                val activeAlpha = (255 * lcdContrast.coerceIn(0.2f, 1f)).toInt()
+                val ghostAlpha = (255 * lcdGhostStrength.coerceIn(0f, 1f)).toInt()
+                val lcdAmber = Color.argb(activeAlpha, 0xFF, 0xB0, 0x00)
+                val lcdGhost = Color.argb(ghostAlpha, 0x5E, 0x38, 0x00)
                 paintGreen.color = lcdAmber; paintYellow.color = lcdAmber; paintRed.color = lcdAmber
                 paintOffGreen.color = lcdGhost; paintOffYellow.color = lcdGhost; paintOffRed.color = lcdGhost
             }
@@ -399,22 +401,17 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         targetR = max(targetR, toLevel(rawR))
     }
 
-    /**
-     * Sets the scaled meter dimensions, reserving space for enabled dB readouts.
-     *
-     * Dimensions follow the configured LED count, orientation, and scale labels rather than
-     * the supplied measure constraints.
-     */
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
-        val extraReadoutW = if (showLiveDb || showPeakDb) 85f else 0f
-        val extraReadoutH = if (showLiveDb || showPeakDb) 36f else 0f
+        val gap = if (themeId in 6..7) lcdSegmentGap else ledGap
+        val extraReadoutW = if (showLiveDb || showPeakDb) 115f else 0f
+        val extraReadoutH = if (showLiveDb || showPeakDb) 38f else 0f
         if (isHorizontal) {
-            val baseW = 40f + ledCount * (ledH + ledGap) + 20f + extraReadoutW
+            val baseW = 40f + ledCount * (ledH + gap) + 28f + extraReadoutW
             val baseH = if (fxDbScale) (20f + colW + 16f + 20f + colW + 20f) else (20f + colW + 12f + colW + 20f)
             setMeasuredDimension((baseW * sizeScale).toInt(), (baseH * sizeScale).toInt())
         } else {
             val baseW = if (fxDbScale) (xScale + 32f) else (xR + colW + 16f)
-            val baseH = topY + ledCount * (ledH + ledGap) - ledGap + 10f + extraReadoutH
+            val baseH = topY + ledCount * (ledH + gap) - gap + 10f + extraReadoutH
             setMeasuredDimension((baseW * sizeScale).toInt(), (baseH * sizeScale).toInt())
         }
     }
@@ -433,18 +430,65 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         canvas.restore()
     }
     
-    /**
-     * Formats a display level using dB = level × 50 − 50, without clamping the input.
-     *
-     * Returns "-INF" at or below −49.5 dB; otherwise returns a signed value with one decimal
-     * place and a US decimal separator. This accepts the mapped display level, not amplitude.
-     */
     private fun formatDb(level: Float): String {
         val db = (level * 50f) - 50f
         return if (db <= -49.5f) "-INF" else String.format(java.util.Locale.US, "%+.1f", db)
     }
 
-    /** Draws four corner screws within [w] by [h] bounds in unscaled meter coordinates. */
+    private fun draw7SegmentChar(canvas: Canvas, char: Char, x: Float, y: Float, w: Float, h: Float, paint: Paint) {
+        val t = max(1.5f, w * 0.18f)
+        val halfH = h / 2f
+
+        // Segments: a (top), b (top-right), c (bottom-right), d (bottom), e (bottom-left), f (top-left), g (middle)
+        val segs = when (char) {
+            '0' -> booleanArrayOf(true, true, true, true, true, true, false)
+            '1' -> booleanArrayOf(false, true, true, false, false, false, false)
+            '2' -> booleanArrayOf(true, true, false, true, true, false, true)
+            '3' -> booleanArrayOf(true, true, true, true, false, false, true)
+            '4' -> booleanArrayOf(false, true, true, false, false, true, true)
+            '5' -> booleanArrayOf(true, false, true, true, false, true, true)
+            '6' -> booleanArrayOf(true, false, true, true, true, true, true)
+            '7' -> booleanArrayOf(true, true, true, false, false, false, false)
+            '8' -> booleanArrayOf(true, true, true, true, true, true, true)
+            '9' -> booleanArrayOf(true, true, true, true, false, true, true)
+            '-' -> booleanArrayOf(false, false, false, false, false, false, true)
+            'P', 'p' -> booleanArrayOf(true, true, false, false, true, true, true)
+            'k', 'K' -> booleanArrayOf(false, true, true, false, true, true, true)
+            'L' -> booleanArrayOf(false, false, false, true, true, true, false)
+            'R' -> booleanArrayOf(true, true, false, false, true, true, true)
+            else -> booleanArrayOf(false, false, false, false, false, false, false)
+        }
+
+        if (char == '.') {
+            canvas.drawRect(x + w * 0.2f, y + h - t * 1.5f, x + w * 0.2f + t * 1.5f, y + h, paint)
+            return
+        }
+
+        val origStyle = paint.style
+        paint.style = Paint.Style.FILL
+
+        if (segs[0]) canvas.drawRect(x + t, y, x + w - t, y + t, paint) // a
+        if (segs[1]) canvas.drawRect(x + w - t, y + t, x + w, y + halfH, paint) // b
+        if (segs[2]) canvas.drawRect(x + w - t, y + halfH, x + w, y + h - t, paint) // c
+        if (segs[3]) canvas.drawRect(x + t, y + h - t, x + w - t, y + h, paint) // d
+        if (segs[4]) canvas.drawRect(x, y + halfH, x + t, y + h - t, paint) // e
+        if (segs[5]) canvas.drawRect(x, y + t, x + t, y + halfH, paint) // f
+        if (segs[6]) canvas.drawRect(x + t, y + halfH - t / 2f, x + w - t, y + halfH + t / 2f, paint) // g
+
+        paint.style = origStyle
+    }
+
+    private fun draw7SegmentString(canvas: Canvas, text: String, x: Float, y: Float, charW: Float, charH: Float, spacing: Float, paint: Paint) {
+        var curX = x
+        for (c in text) {
+            val cw = if (c == '.' || c == ' ') charW * 0.5f else charW
+            if (c != ' ') {
+                draw7SegmentChar(canvas, c, curX, y, cw, charH, paint)
+            }
+            curX += cw + spacing
+        }
+    }
+
     private fun drawRackScrews(canvas: Canvas, w: Float, h: Float) {
         val r = 3.5f
         val margin = 6f
@@ -463,11 +507,6 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         }
     }
 
-    /**
-     * Draws vertical channels, themed housing, optional scale, and enabled readouts below the bars.
-     *
-     * Coordinates are unscaled; the caller applies the display scale to [canvas].
-     */
     private fun drawVertical(canvas: Canvas) {
         val extraReadoutH = if (showLiveDb || showPeakDb) 36f else 0f
         val totalW = xScale + 32f
@@ -520,20 +559,41 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         if (showLiveDb || showPeakDb) {
             paintReadout.color = when (themeId) {
                 5 -> Color.parseColor("#00D4E8")
-                6 -> Color.parseColor("#33FF66")
-                7 -> Color.parseColor("#FFB000")
+                6 -> Color.argb((255 * lcdContrast.coerceIn(0.2f, 1f)).toInt(), 0x33, 0xFF, 0x66)
+                7 -> Color.argb((255 * lcdContrast.coerceIn(0.2f, 1f)).toInt(), 0xFF, 0xB0, 0x00)
                 else -> Color.WHITE
             }
             paintReadout.textAlign = Paint.Align.CENTER
             var readoutY = towerBottom + 16f
-            if (showLiveDb) {
-                canvas.drawText(formatDb(levelL), xL + colW / 2f, readoutY, paintReadout)
-                canvas.drawText(formatDb(levelR), xR + colW / 2f, readoutY, paintReadout)
-                readoutY += 14f
-            }
-            if (showPeakDb) {
-                canvas.drawText("Pk " + formatDb(peakL), xL + colW / 2f, readoutY, paintReadout)
-                canvas.drawText("Pk " + formatDb(peakR), xR + colW / 2f, readoutY, paintReadout)
+
+            val use7Seg = (themeId in 6..7) && lcdSevenSegment
+            if (use7Seg) {
+                val cw = 6.5f
+                val ch = 11f
+                val sp = 1.8f
+                if (showLiveDb) {
+                    val sL = formatDb(levelL)
+                    val sR = formatDb(levelR)
+                    draw7SegmentString(canvas, sL, xL + (colW - sL.length * (cw + sp)) / 2f, readoutY - 9f, cw, ch, sp, paintReadout)
+                    draw7SegmentString(canvas, sR, xR + (colW - sR.length * (cw + sp)) / 2f, readoutY - 9f, cw, ch, sp, paintReadout)
+                    readoutY += 15f
+                }
+                if (showPeakDb) {
+                    val sL = "Pk " + formatDb(peakL)
+                    val sR = "Pk " + formatDb(peakR)
+                    draw7SegmentString(canvas, sL, xL + (colW - sL.length * (cw + sp)) / 2f, readoutY - 9f, cw, ch, sp, paintReadout)
+                    draw7SegmentString(canvas, sR, xR + (colW - sR.length * (cw + sp)) / 2f, readoutY - 9f, cw, ch, sp, paintReadout)
+                }
+            } else {
+                if (showLiveDb) {
+                    canvas.drawText(formatDb(levelL), xL + colW / 2f, readoutY, paintReadout)
+                    canvas.drawText(formatDb(levelR), xR + colW / 2f, readoutY, paintReadout)
+                    readoutY += 14f
+                }
+                if (showPeakDb) {
+                    canvas.drawText("Pk " + formatDb(peakL), xL + colW / 2f, readoutY, paintReadout)
+                    canvas.drawText("Pk " + formatDb(peakR), xR + colW / 2f, readoutY, paintReadout)
+                }
             }
         }
 
@@ -551,11 +611,6 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         }
     }
 
-    /**
-     * Draws horizontal channels, themed housing, optional scale, and enabled readouts to the right.
-     *
-     * Coordinates are unscaled; the caller applies the display scale to [canvas].
-     */
     private fun drawHorizontal(canvas: Canvas) {
         val extraReadoutW = if (showLiveDb || showPeakDb) 85f else 0f
         val startX = 40f
@@ -609,25 +664,42 @@ class StereoVuView(context: Context) : FrameLayout(context) {
             drawScaleHorizontal(canvas, startX, yScale)
         }
 
-        // Live dB + Peak text on the right
+        // Live dB + Peak text on the right with extra spacing & 7-seg support
         if (showLiveDb || showPeakDb) {
-            val textX = barsEnd + 12f
+            val textX = barsEnd + 16f
             paintReadout.color = when (themeId) {
                 5 -> Color.parseColor("#00D4E8")
-                6 -> Color.parseColor("#33FF66")
-                7 -> Color.parseColor("#FFB000")
+                6 -> Color.argb((255 * lcdContrast.coerceIn(0.2f, 1f)).toInt(), 0x33, 0xFF, 0x66)
+                7 -> Color.argb((255 * lcdContrast.coerceIn(0.2f, 1f)).toInt(), 0xFF, 0xB0, 0x00)
                 else -> Color.WHITE
             }
             paintReadout.textAlign = Paint.Align.LEFT
 
-            if (showLiveDb) {
-                canvas.drawText("L " + formatDb(levelL), textX, yL + colW * 0.4f, paintReadout)
-                canvas.drawText("R " + formatDb(levelR), textX, yR + colW * 0.4f, paintReadout)
-            }
-            if (showPeakDb) {
-                val pkYOffset = if (showLiveDb) colW * 0.75f else colW * 0.5f
-                canvas.drawText("Pk " + formatDb(peakL), textX, yL + pkYOffset, paintReadout)
-                canvas.drawText("Pk " + formatDb(peakR), textX, yR + pkYOffset, paintReadout)
+            val use7Seg = (themeId in 6..7) && lcdSevenSegment
+            if (use7Seg) {
+                val cw = 6.5f
+                val ch = 11f
+                val sp = 1.8f
+                if (showLiveDb) {
+                    draw7SegmentString(canvas, "L " + formatDb(levelL), textX, yL + colW * 0.25f, cw, ch, sp, paintReadout)
+                    draw7SegmentString(canvas, "R " + formatDb(levelR), textX, yR + colW * 0.25f, cw, ch, sp, paintReadout)
+                }
+                if (showPeakDb) {
+                    val pkY_L = if (showLiveDb) yL + colW * 0.62f else yL + colW * 0.35f
+                    val pkY_R = if (showLiveDb) yR + colW * 0.62f else yR + colW * 0.35f
+                    draw7SegmentString(canvas, "Pk " + formatDb(peakL), textX, pkY_L, cw, ch, sp, paintReadout)
+                    draw7SegmentString(canvas, "Pk " + formatDb(peakR), textX, pkY_R, cw, ch, sp, paintReadout)
+                }
+            } else {
+                if (showLiveDb) {
+                    canvas.drawText("L " + formatDb(levelL), textX, yL + colW * 0.38f, paintReadout)
+                    canvas.drawText("R " + formatDb(levelR), textX, yR + colW * 0.38f, paintReadout)
+                }
+                if (showPeakDb) {
+                    val pkYOffset = if (showLiveDb) colW * 0.75f else colW * 0.5f
+                    canvas.drawText("Pk " + formatDb(peakL), textX, yL + pkYOffset, paintReadout)
+                    canvas.drawText("Pk " + formatDb(peakR), textX, yR + pkYOffset, paintReadout)
+                }
             }
         }
 

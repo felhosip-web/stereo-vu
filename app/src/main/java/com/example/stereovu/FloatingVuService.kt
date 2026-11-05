@@ -38,7 +38,6 @@ class FloatingVuService : Service() {
 
     override fun onBind(intent: Intent?): IBinder? = null
 
-    /** Loads capture preferences, listens for changes, and starts the foreground notification. */
     override fun onCreate() {
         super.onCreate()
         val prefs = getSharedPreferences("StereoVuPrefs", Context.MODE_PRIVATE)
@@ -51,12 +50,6 @@ class FloatingVuService : Service() {
         startForegroundNotification()
     }
 
-    /**
-     * Handles ACTION_STOP with START_NOT_STICKY; otherwise shows the overlay and starts capture.
-     *
-     * The optional captureIntent extra supplies playback capture consent. Returns START_STICKY
-     * for capture requests; a missing captureIntent selects microphone capture.
-     */
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent?.action == "ACTION_STOP") {
             stopSelf()
@@ -126,16 +119,6 @@ class FloatingVuService : Service() {
         windowManager?.addView(vuView, params)
     }
 
-    /**
-     * Starts stereo capture on a worker thread unless a recorder already exists.
-     *
-     * Uses playback capture at 48 kHz on Android Q or later when [captureIntent] is supplied;
-     * otherwise uses the microphone at 44.1 kHz. Posts normalized peak or sliding-window RMS
-     * levels to the overlay. True Peak mode also checks linear quarter and midpoint samples
-     * within each buffer. RMS uses a window clamped to 50–1000 ms.
-     *
-     * Exceptions during worker capture or processing end the worker without reaching the caller.
-     */
     private fun startAudioCapture(captureIntent: Intent?) {
         if (audioRecord != null) return
         thread {

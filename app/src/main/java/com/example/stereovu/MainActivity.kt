@@ -25,7 +25,6 @@ class MainActivity : Activity() {
     private var mediaProjectionManager: MediaProjectionManager? = null
     private lateinit var prefs: SharedPreferences
 
-    /** Builds the settings controls with preference updates and overlay start/stop actions. */
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         prefs = getSharedPreferences("StereoVuPrefs", Context.MODE_PRIVATE)
@@ -542,6 +541,71 @@ class MainActivity : Activity() {
             layoutParams = layoutParamsMatch
         }
         sec3.addView(peakSpinner)
+
+        // --- LCD Testreszabás (LCD Appearance & Controls) ---
+        val lcdTitle = TextView(this).apply {
+            text = "LCD Testreszabás (LCD Settings)"
+            setTextColor(Color.parseColor("#33FF66"))
+            textSize = 15f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, 16, 0, 4)
+        }
+        sec3.addView(lcdTitle)
+
+        val lcdNote = TextView(this).apply {
+            text = "Ezek a beállítások az LCD Zöld és LCD Borostyán témák megjelenését finomhangolják."
+            setTextColor(Color.parseColor("#8E8E93"))
+            textSize = 12f
+            setPadding(0, 0, 0, 8)
+        }
+        sec3.addView(lcdNote)
+
+        addSlider(
+            sec3,
+            layoutParamsMatch,
+            labelPrefix = "Ghost erősség (Ghost strength)",
+            minVal = 0.0f,
+            maxVal = 1.0f,
+            defaultVal = 0.55f,
+            prefKey = "lcd_ghost_strength"
+        ) { v ->
+            "${(v * 100).toInt()}%"
+        }
+
+        addSlider(
+            sec3,
+            layoutParamsMatch,
+            labelPrefix = "LCD Kontraszt (LCD Contrast)",
+            minVal = 0.20f,
+            maxVal = 1.0f,
+            defaultVal = 0.80f,
+            prefKey = "lcd_contrast"
+        ) { v ->
+            "${(v * 100).toInt()}%"
+        }
+
+        addIntSlider(
+            sec3,
+            layoutParamsMatch,
+            labelPrefix = "Szegmens résméret (Segment gap)",
+            minVal = 1,
+            maxVal = 6,
+            defaultVal = 2,
+            prefKey = "lcd_segment_gap",
+            unit = "px"
+        )
+
+        val sevenSegCheckbox = CheckBox(this).apply {
+            text = "7-szegmenses számjegyek (7-segment digits)"
+            setTextColor(Color.parseColor("#E0E0E0"))
+            textSize = 14f
+            isChecked = prefs.getBoolean("lcd_seven_segment", true)
+            setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean("lcd_seven_segment", isChecked).apply()
+            }
+            layoutParams = layoutParamsMatch
+        }
+        sec3.addView(sevenSegCheckbox)
 
         container.addView(sec3)
 
