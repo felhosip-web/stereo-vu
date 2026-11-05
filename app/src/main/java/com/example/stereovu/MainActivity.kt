@@ -171,18 +171,19 @@ class MainActivity : Activity() {
             "Digitális Peak (Gyors, pontos)",
             "Analóg VU (Rugós tehetetlenség)",
             "PPM (Gyors felfutás, lassú lecsengés)",
-            "True Peak (Inter-sample peak)",
+            "True Peak (Inter-sample csúcsérték)",
             "Classic VU (300 ms integráció, ±1 dB)",
             "BBC PPM (Lépcsős / több-fázisú lecsengés)",
             "Nordic / DIN (Gyors attack, egyedi decay)",
             "Egyéni (Csúszkák alapján)"
         )
+        val initialMode = BallisticsModeMigration.getMigratedMode(prefs)
         val modeSpinner = Spinner(this).apply {
             val adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, modes).apply {
                 setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
             }
             this.adapter = adapter
-            setSelection(prefs.getInt("mode", 0))
+            setSelection(initialMode)
             onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
                 override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                     prefs.edit().putInt("mode", position).apply()
@@ -263,7 +264,6 @@ class MainActivity : Activity() {
             java.lang.String.format(Locale.US, "%.3f", v)
         }
 
-        // Peak never below bar
         val peakNeverBelowCheckbox = CheckBox(this).apply {
             text = "Peak soha nem megy a sáv alá (Peak never below bar)"
             setTextColor(Color.parseColor("#E0E0E0"))
@@ -368,30 +368,6 @@ class MainActivity : Activity() {
         }
         sec2.addView(dbScaleCheckbox)
 
-        val liveDbCheckbox = CheckBox(this).apply {
-            text = "Élő dB érték (Live dB readout)"
-            setTextColor(Color.parseColor("#E0E0E0"))
-            textSize = 14f
-            isChecked = prefs.getBoolean("show_live_db", true)
-            setOnCheckedChangeListener { _, isChecked ->
-                prefs.edit().putBoolean("show_live_db", isChecked).apply()
-            }
-            layoutParams = layoutParamsMatch
-        }
-        sec2.addView(liveDbCheckbox)
-
-        val peakDbCheckbox = CheckBox(this).apply {
-            text = "Csúcsérték dB (Peak dB readout)"
-            setTextColor(Color.parseColor("#E0E0E0"))
-            textSize = 14f
-            isChecked = prefs.getBoolean("show_peak_db", true)
-            setOnCheckedChangeListener { _, isChecked ->
-                prefs.edit().putBoolean("show_peak_db", isChecked).apply()
-            }
-            layoutParams = layoutParamsMatch
-        }
-        sec2.addView(peakDbCheckbox)
-
         container.addView(sec2)
 
         // =========================================================================
@@ -413,9 +389,7 @@ class MainActivity : Activity() {
             "Tűz (Sárga-Narancs-Vörös)",
             "Jég (Türkiz-Kék-Fehér)",
             "Naplemente (Arany-Bíbor)",
-            "VFD (Klasszikus Cián)",
-            "LCD Zöld (Retro LCD Green)",
-            "LCD Borostyán (LCD Amber)"
+            "VFD (Klasszikus Cián)"
         )
         val themeSpinner = Spinner(this).apply {
             val adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, themes).apply {
@@ -541,71 +515,6 @@ class MainActivity : Activity() {
             layoutParams = layoutParamsMatch
         }
         sec3.addView(peakSpinner)
-
-        // --- LCD Testreszabás (LCD Appearance & Controls) ---
-        val lcdTitle = TextView(this).apply {
-            text = "LCD Testreszabás (LCD Settings)"
-            setTextColor(Color.parseColor("#33FF66"))
-            textSize = 15f
-            typeface = Typeface.DEFAULT_BOLD
-            setPadding(0, 16, 0, 4)
-        }
-        sec3.addView(lcdTitle)
-
-        val lcdNote = TextView(this).apply {
-            text = "Ezek a beállítások az LCD Zöld és LCD Borostyán témák megjelenését finomhangolják."
-            setTextColor(Color.parseColor("#8E8E93"))
-            textSize = 12f
-            setPadding(0, 0, 0, 8)
-        }
-        sec3.addView(lcdNote)
-
-        addSlider(
-            sec3,
-            layoutParamsMatch,
-            labelPrefix = "Ghost erősség (Ghost strength)",
-            minVal = 0.0f,
-            maxVal = 1.0f,
-            defaultVal = 0.55f,
-            prefKey = "lcd_ghost_strength"
-        ) { v ->
-            "${(v * 100).toInt()}%"
-        }
-
-        addSlider(
-            sec3,
-            layoutParamsMatch,
-            labelPrefix = "LCD Kontraszt (LCD Contrast)",
-            minVal = 0.20f,
-            maxVal = 1.0f,
-            defaultVal = 0.80f,
-            prefKey = "lcd_contrast"
-        ) { v ->
-            "${(v * 100).toInt()}%"
-        }
-
-        addIntSlider(
-            sec3,
-            layoutParamsMatch,
-            labelPrefix = "Szegmens résméret (Segment gap)",
-            minVal = 1,
-            maxVal = 6,
-            defaultVal = 2,
-            prefKey = "lcd_segment_gap",
-            unit = "px"
-        )
-
-        val sevenSegCheckbox = CheckBox(this).apply {
-            text = "7-szegmenses számjegyek (7-segment digits)"
-            setTextColor(Color.parseColor("#E0E0E0"))
-            textSize = 14f
-            isChecked = prefs.getBoolean("lcd_seven_segment", true)
-            setOnCheckedChangeListener { _, isChecked ->
-                prefs.edit().putBoolean("lcd_seven_segment", isChecked).apply()
-            }
-            layoutParams = layoutParamsMatch
-        }
-        sec3.addView(sevenSegCheckbox)
 
         container.addView(sec3)
 
