@@ -11,23 +11,27 @@ import kotlin.math.abs
  */
 class TruePeakDetector {
     companion object {
-        // ITU-R BS.1770 compliant 4x oversampling 48-tap symmetric FIR filter (12 taps per sub-phase)
-        // Phase 0 represents direct sample interpolation (peaked around center tap)
-        // Phases 1, 2, 3 represent reconstructed inter-sample points at 1/4, 2/4, 3/4 sample offsets.
-        private val PHASE_0 = doubleArrayOf(
+        // 4x oversampling polyphase FIR reconstruction filter (12 taps per sub-phase, 48 taps total)
+        // Designed via windowed sinc interpolation with unity DC gain per sub-phase.
+        // Tap k=0 corresponds to the newest sample, and k=11 to the oldest sample in history.
+        // Phase 0 is the original sample (delay of 5 samples).
+        // Phase 1 reconstructs at offset +0.25 (peak at tap 5).
+        // Phase 2 reconstructs at offset +0.50 (symmetric peak between tap 5 and tap 6).
+        // Phase 3 reconstructs at offset +0.75 (peak at tap 6).
+        val PHASE_0 = doubleArrayOf(
             0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0
         )
-        private val PHASE_1 = doubleArrayOf(
-            -0.00539, 0.01912, -0.04873, 0.11107, -0.27092, 0.88788,
-             0.38075, -0.12932, 0.05778, -0.02476, 0.00905, -0.00216
+        val PHASE_1 = doubleArrayOf(
+            -0.00040574,  0.00452106, -0.01807915,  0.05255905, -0.14447287,  0.88354769,
+             0.29451590, -0.10319490,  0.04300286, -0.01566860,  0.00404516, -0.00037046
         )
-        private val PHASE_2 = doubleArrayOf(
-            -0.00941, 0.03362, -0.08805, 0.22238, -0.63662, 0.63662,
-            -0.22238, 0.08805, -0.03362, 0.00941, -0.00201, 0.00042
+        val PHASE_2 = doubleArrayOf(
+            -0.00054430,  0.00600078, -0.02359308,  0.06647851, -0.16919841,  0.62085649,
+             0.62085649, -0.16919841,  0.06647851, -0.02359308,  0.00600078, -0.00054430
         )
-        private val PHASE_3 = doubleArrayOf(
-            -0.00216, 0.00905, -0.02476, 0.05778, -0.12932, 0.38075,
-             0.88788, -0.27092, 0.11107, -0.04873, 0.01912, -0.00539
+        val PHASE_3 = doubleArrayOf(
+            -0.00037046,  0.00404516, -0.01566860,  0.04300286, -0.10319490,  0.29451590,
+             0.88354769, -0.14447287,  0.05255905, -0.01807915,  0.00452106, -0.00040574
         )
         const val TAPS = 12
     }

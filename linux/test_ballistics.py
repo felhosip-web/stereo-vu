@@ -1,7 +1,7 @@
 import unittest
 import math
 import numpy as np
-from true_peak import TruePeakDetector, get_migrated_mode
+from true_peak import TruePeakDetector, get_migrated_mode, PHASE_1, PHASE_2, PHASE_3
 
 class FakeSettings:
     """Mock for QSettings to test idempotent migration and preference retrieval."""
@@ -22,10 +22,36 @@ class FakeSettings:
         self.data[key] = val
 
 class TestBallisticsAndPeak(unittest.TestCase):
+    def test_fir_phase_dc_gains(self):
+        """
+        1. Constant DC input: verify that every polyphase sub-filter preserves DC level
+        within a tight tolerance (sum of coefficients == 1.0).
+        """
+        sum_p0 = 1.0 # Phase 0 is identity tap [0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0]
+        sum_p1 = float(np.sum(PHASE_1))
+        sum_p2 = float(np.sum(PHASE_2))
+        sum_p3 = float(np.sum(PHASE_3))
+
+        self.assertAlmostEqual(sum_p0, 1.0, places=6)
+        self.assertAlmostEqual(sum_p1, 1.0, places=6)
+        self.assertAlmostEqual(sum_p2, 1.0, places=6)
+        self.assertAlmostEqual(sum_p3, 1.0, places=6)
+
+        # Process a continuous constant DC buffer and verify reconstructed peak equals the DC value
+        # We prime the filter past the 12-tap startup delay line
+        tp = TruePeakDetector()
+        dc_val = 0.75
+        tp.process_buffer(np.full(12, dc_val, dtype=np.float64), np.full(12, -dc_val, dtype=np.float64))
+        dc_l = np.full(30, dc_val, dtype=np.float64)
+        dc_r = np.full(30, -dc_val, dtype=np.float64)
+        peak_l, peak_r = tp.process_buffer(dc_l, dc_r)
+        self.assertAlmostEqual(peak_l, dc_val, places=4)
+        self.assertAlmostEqual(peak_r, dc_val, places=4)
+
     def test_true_peak_intersample_overshoot(self):
         """
-        Verify that TruePeakDetector detects inter-sample peaks that demonstrably
-        exceed the largest discrete sample.
+        2. Inter-sample overshoot: verify that TruePeakDetector detects inter-sample peaks
+        that demonstrably exceed the largest discrete sample.
         For a sine wave at fs/4 (4 samples per period) sampled with 45 degree phase offset:
         Samples: sin(pi/4), sin(3pi/4), sin(5pi/4), sin(7pi/4) = [+0.7071, +0.7071, -0.7071, -0.7071].
         Discrete peak = 0.7071, continuous true peak = 1.0!
@@ -42,10 +68,55 @@ class TestBallisticsAndPeak(unittest.TestCase):
         # True peak must demonstrably exceed discrete sample max
         self.assertGreater(peak_l, discrete_max_l + 0.15)
         self.assertGreater(peak_r, discrete_max_r + 0.07)
-        self.assertAlmostEqual(peak_l, 1.0, delta=0.1)
+        self.assertAlmostEqual(peak_l, 1.0, delta=0.05)
+        self.assertAlmostEqual(peak_r, 0.5, delta=0.05)
+
+    def test_full_scale_and_near_full_scale(self):
+        """
+        3. Full-scale and near-full-scale signals:
+        Ensure that TruePeakDetector correctly handles 1.0 and 0.99 signals without clipping or overflow.
+        """
+        tp = TruePeakDetector()
+        fs_l = np.array([1.0, -1.0, 1.0, -1.0] * 8, dtype=np.float64)
+        fs_r = np.array([0.99, -0.99, 0.99, -0.99] * 8, dtype=np.float64)
+        peak_l, peak_r = tp.process_buffer(fs_l, fs_r)
+        self.assertGreaterEqual(peak_l, 1.0)
+        self.assertGreaterEqual(peak_r, 0.99)
+
+    def test_positive_and_negative_polarity(self):
+        """
+        4. Polarity invariance:
+        A positive peak and negative peak of equal magnitude must produce identical True Peak values.
+        """
+        tp_pos = TruePeakDetector()
+        tp_neg = TruePeakDetector()
+
+        s = 0.8
+        pos_l = np.array([0.0, s, 0.0, 0.0] * 5, dtype=np.float64)
+        neg_l = np.array([0.0, -s, 0.0, 0.0] * 5, dtype=np.float64)
+
+        p_pos_l, _ = tp_pos.process_buffer(pos_l, pos_l)
+        p_neg_l, _ = tp_neg.process_buffer(neg_l, neg_l)
+
+        self.assertAlmostEqual(p_pos_l, p_neg_l, places=6)
+
+    def test_independent_left_right_channels(self):
+        """
+        5. Channel independence:
+        Left and right channels must not cross-bleed or influence each other's True Peak.
+        """
+        tp = TruePeakDetector()
+        s = math.sin(math.pi / 4.0)
+        sig_l = np.array([s, s, -s, -s] * 8, dtype=np.float64)
+        silence_r = np.zeros(32, dtype=np.float64)
+
+        peak_l, peak_r = tp.process_buffer(sig_l, silence_r)
+        self.assertGreater(peak_l, 0.95)
+        self.assertAlmostEqual(peak_r, 0.0, places=6)
 
     def test_true_peak_buffer_continuity(self):
         """
+        6. Buffer-boundary continuity:
         Verify that filter delay state is preserved across audio buffer boundaries.
         Splitting samples across two buffers must not lose the reconstructed peak.
         """
@@ -70,9 +141,25 @@ class TestBallisticsAndPeak(unittest.TestCase):
         self.assertAlmostEqual(peak_cont_l, peak_split_l, places=4)
         self.assertAlmostEqual(peak_cont_r, peak_split_r, places=4)
 
+    def test_reset_behavior(self):
+        """
+        7. Reset behavior:
+        Calling reset() clears the delay history so previous signals do not affect new buffers.
+        """
+        tp = TruePeakDetector()
+        s = 0.9
+        ones = np.full(12, s, dtype=np.float64)
+        tp.process_buffer(ones, ones)
+
+        tp.reset()
+        zeros = np.zeros(12, dtype=np.float64)
+        peak_l, peak_r = tp.process_buffer(zeros, zeros)
+        self.assertEqual(peak_l, 0.0)
+        self.assertEqual(peak_r, 0.0)
+
     def test_discrete_peak_unaltered(self):
         """
-        Verify that ordinary Peak mode remains discrete max sample.
+        8. Ordinary sample Peak mode must remain unchanged.
         """
         s = 0.65
         indata = np.array([[s, -s], [-s, s], [s, -s]], dtype=np.float32)
@@ -97,6 +184,10 @@ class TestBallisticsAndPeak(unittest.TestCase):
         # Test idempotence (subsequent call keeps mode 7)
         self.assertEqual(get_migrated_mode(s_custom), 7)
 
+        # Test new True Peak mode 3 after migration remains mode 3
+        s_new_tp = FakeSettings({"mode": 3, "ballistics_v2_migrated": True})
+        self.assertEqual(get_migrated_mode(s_new_tp), 3)
+
         # Test v1 mode 1 (Analog VU) remains mode 1
         s_analog = FakeSettings({"mode": 1})
         self.assertEqual(get_migrated_mode(s_analog), 1)
@@ -110,7 +201,6 @@ class TestBallisticsAndPeak(unittest.TestCase):
         """
         Verify Classic VU parameters are not overwritten by user Analog VU preferences.
         """
-        # User has custom analog spring=0.35 and damp=0.15
         user_spring = 0.35
         user_damp = 0.15
 
@@ -165,7 +255,6 @@ class TestBallisticsAndPeak(unittest.TestCase):
             if peak < display_level:
                 peak = display_level
 
-        # 0.8 * 0.5 = 0.4, clamped to 0.7
         self.assertEqual(peak, 0.7)
 
     def test_bbc_ppm_stepped_release(self):

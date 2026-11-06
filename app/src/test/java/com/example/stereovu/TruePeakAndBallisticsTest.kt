@@ -9,6 +9,35 @@ import kotlin.math.PI
 class TruePeakAndBallisticsTest {
 
     @Test
+    fun testFirPhaseDcGains() {
+        val sumP0 = TruePeakDetector.PHASE_0.sum()
+        val sumP1 = TruePeakDetector.PHASE_1.sum()
+        val sumP2 = TruePeakDetector.PHASE_2.sum()
+        val sumP3 = TruePeakDetector.PHASE_3.sum()
+
+        assertEquals(1.0, sumP0, 0.0001)
+        assertEquals(1.0, sumP1, 0.0001)
+        assertEquals(1.0, sumP2, 0.0001)
+        assertEquals(1.0, sumP3, 0.0001)
+
+        val tp = TruePeakDetector()
+        val dcVal = 0.75
+        // Prime filter
+        for (i in 0 until 12) {
+            tp.processSample(dcVal, -dcVal)
+        }
+        var maxL = 0.0
+        var maxR = 0.0
+        for (i in 0 until 20) {
+            tp.processSample(dcVal, -dcVal)
+            if (tp.lastPeakL > maxL) maxL = tp.lastPeakL
+            if (tp.lastPeakR > maxR) maxR = tp.lastPeakR
+        }
+        assertEquals(dcVal, maxL, 0.001)
+        assertEquals(dcVal, maxR, 0.001)
+    }
+
+    @Test
     fun testTruePeakIntersampleOvershoot() {
         val tp = TruePeakDetector()
         val s = sin(PI / 4.0) // 0.707106...
@@ -65,6 +94,36 @@ class TruePeakAndBallisticsTest {
         }
 
         assertEquals(maxCont, maxSplit, 0.0001)
+    }
+
+    @Test
+    fun testResetBehavior() {
+        val tp = TruePeakDetector()
+        for (i in 0 until 12) {
+            tp.processSample(0.9, 0.9)
+        }
+        tp.reset()
+        assertEquals(0.0, tp.lastPeakL, 0.0001)
+        assertEquals(0.0, tp.lastPeakR, 0.0001)
+        tp.processSample(0.0, 0.0)
+        assertEquals(0.0, tp.lastPeakL, 0.0001)
+        assertEquals(0.0, tp.lastPeakR, 0.0001)
+    }
+
+    @Test
+    fun testChannelIndependence() {
+        val tp = TruePeakDetector()
+        val s = sin(PI / 4.0)
+        var maxL = 0.0
+        var maxR = 0.0
+        for (i in 0 until 32) {
+            val v = if (i % 4 in 0..1) s else -s
+            tp.processSample(v, 0.0)
+            if (tp.lastPeakL > maxL) maxL = tp.lastPeakL
+            if (tp.lastPeakR > maxR) maxR = tp.lastPeakR
+        }
+        assertTrue("Expected left peak > 0.9, got $maxL", maxL > 0.9)
+        assertEquals(0.0, maxR, 0.0001)
     }
 
     @Test
