@@ -389,7 +389,9 @@ class MainActivity : Activity() {
             "Tűz (Sárga-Narancs-Vörös)",
             "Jég (Türkiz-Kék-Fehér)",
             "Naplemente (Arany-Bíbor)",
-            "VFD (Klasszikus Cián)"
+            "VFD (Klasszikus Cián)",
+            "LCD Green (Zöld LCD)",
+            "LCD Amber (Borostyán LCD)"
         )
         val themeSpinner = Spinner(this).apply {
             val adapter = ArrayAdapter(this@MainActivity, android.R.layout.simple_spinner_item, themes).apply {
@@ -515,6 +517,64 @@ class MainActivity : Activity() {
             layoutParams = layoutParamsMatch
         }
         sec3.addView(peakSpinner)
+
+        // LCD Megjelenés (LCD Appearance) - Érvényes: LCD Green és LCD Amber témákra
+        val lcdTitle = TextView(this).apply {
+            text = "LCD megjelenés (LCD Green & Amber témákhoz)"
+            setTextColor(Color.parseColor("#33FF66"))
+            textSize = 15f
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(0, 16, 0, 8)
+        }
+        sec3.addView(lcdTitle)
+
+        addSlider(
+            sec3,
+            layoutParamsMatch,
+            labelPrefix = "Ghost erősség (Ghost strength)",
+            minVal = 0.0f,
+            maxVal = 1.0f,
+            defaultVal = 0.55f,
+            prefKey = "lcd_ghost_strength"
+        ) { v ->
+            "${(v * 100).toInt()}%"
+        }
+
+        addSlider(
+            sec3,
+            layoutParamsMatch,
+            labelPrefix = "Szegmens rés (Segment gap)",
+            minVal = 1.0f,
+            maxVal = 6.0f,
+            defaultVal = 2.0f,
+            prefKey = "lcd_segment_gap"
+        ) { v ->
+            java.lang.String.format(Locale.US, "%.1f px", v)
+        }
+
+        val sevenSegCheckbox = CheckBox(this).apply {
+            text = "Hétszegmenses kijelzés (Seven-segment readouts)"
+            setTextColor(Color.parseColor("#E0E0E0"))
+            textSize = 14f
+            isChecked = prefs.getBoolean("lcd_seven_segment", true)
+            setOnCheckedChangeListener { _, isChecked ->
+                prefs.edit().putBoolean("lcd_seven_segment", isChecked).apply()
+            }
+            layoutParams = layoutParamsMatch
+        }
+        sec3.addView(sevenSegCheckbox)
+
+        addSlider(
+            sec3,
+            layoutParamsMatch,
+            labelPrefix = "LCD Kontraszt (LCD contrast)",
+            minVal = 0.20f,
+            maxVal = 1.0f,
+            defaultVal = 0.80f,
+            prefKey = "lcd_contrast"
+        ) { v ->
+            "${(v * 100).toInt()}%"
+        }
 
         container.addView(sec3)
 

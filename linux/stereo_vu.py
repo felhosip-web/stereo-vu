@@ -140,7 +140,16 @@ class SettingsDialog(QDialog):
         layout3 = QFormLayout(tab3)
 
         self.theme_combo = QComboBox()
-        self.theme_combo.addItems(["Klasszikus (Zöld-Narancs-Piros)", "Cyberpunk (Neon Kék-Rózsaszín)", "Tűz (Sárga-Narancs-Vörös)", "Jég (Türkiz-Kék-Fehér)", "Naplemente (Arany-Bíbor)", "VFD (Klasszikus Cián)"])
+        self.theme_combo.addItems([
+            "Klasszikus (Zöld-Narancs-Piros)",
+            "Cyberpunk (Neon Kék-Rózsaszín)",
+            "Tűz (Sárga-Narancs-Vörös)",
+            "Jég (Türkiz-Kék-Fehér)",
+            "Naplemente (Arany-Bíbor)",
+            "VFD (Klasszikus Cián)",
+            "LCD Green (Zöld LCD)",
+            "LCD Amber (Borostyán LCD)"
+        ])
         self.theme_combo.setCurrentIndex(self.settings.value("theme", 0, type=int))
         layout3.addRow("Színséma:", self.theme_combo)
 
@@ -171,6 +180,30 @@ class SettingsDialog(QDialog):
             old_colored = self.settings.value("colored_peak", False, type=bool)
             self.peak_combo.setCurrentIndex(1 if old_colored else 0)
         layout3.addRow("Peak LED stílusa:", self.peak_combo)
+
+                # LCD Megjelenés (LCD Appearance) - Érvényes: LCD Green és LCD Amber témákra
+        lcd_header = QLabel("<b>LCD Megjelenés (LCD Green & Amber)</b>")
+        lcd_header.setStyleSheet("color: #33FF66; margin-top: 10px; margin-bottom: 2px;")
+        layout3.addRow(lcd_header)
+
+        self.lcd_ghost_slider = QSlider(Qt.Orientation.Horizontal)
+        self.lcd_ghost_slider.setRange(0, 100)
+        self.lcd_ghost_slider.setValue(int(round(self.settings.value("lcd_ghost_strength", 0.55, type=float) * 100)))
+        layout3.addRow("LCD Ghost erősség (0-100%):", self.lcd_ghost_slider)
+
+        self.lcd_gap_slider = QSlider(Qt.Orientation.Horizontal)
+        self.lcd_gap_slider.setRange(10, 60)
+        self.lcd_gap_slider.setValue(int(round(self.settings.value("lcd_segment_gap", 2.0, type=float) * 10)))
+        layout3.addRow("LCD Szegmens rés (1-6 px):", self.lcd_gap_slider)
+
+        self.lcd_seven_check = QCheckBox("Hétszegmenses dB kijelzés")
+        self.lcd_seven_check.setChecked(self.settings.value("lcd_seven_segment", True, type=bool))
+        layout3.addRow("Számérték stílus:", self.lcd_seven_check)
+
+        self.lcd_contrast_slider = QSlider(Qt.Orientation.Horizontal)
+        self.lcd_contrast_slider.setRange(20, 100)
+        self.lcd_contrast_slider.setValue(int(round(self.settings.value("lcd_contrast", 0.80, type=float) * 100)))
+        layout3.addRow("LCD Kontraszt (20-100%):", self.lcd_contrast_slider)
 
         self.tabs.addTab(tab3, "Megjelenés & Elrendezés")
 
@@ -268,6 +301,10 @@ class SettingsDialog(QDialog):
         self.settings.setValue("fx_sheen", self.fx_sheen_check.isChecked())
         self.settings.setValue("fx_ghost", self.fx_ghost_check.isChecked())
         self.settings.setValue("fx_db_scale", self.fx_db_scale_check.isChecked())
+        self.settings.setValue("lcd_ghost_strength", self.lcd_ghost_slider.value() / 100.0)
+        self.settings.setValue("lcd_segment_gap", self.lcd_gap_slider.value() / 10.0)
+        self.settings.setValue("lcd_seven_segment", self.lcd_seven_check.isChecked())
+        self.settings.setValue("lcd_contrast", self.lcd_contrast_slider.value() / 100.0)
         self.accept()
 
 class VuMeter(QWidget):
@@ -423,13 +460,23 @@ class VuMeter(QWidget):
         self.fx_sheen = self.settings.value("fx_sheen", True, type=bool)
         self.fx_ghost = self.settings.value("fx_ghost", True, type=bool)
         self.fx_db_scale = self.settings.value("fx_db_scale", True, type=bool)
+        self.lcd_ghost_strength = max(0.0, min(1.0, self.settings.value("lcd_ghost_strength", 0.55, type=float)))
+        self.lcd_segment_gap = max(1.0, min(6.0, self.settings.value("lcd_segment_gap", 2.0, type=float)))
+        self.lcd_seven_segment = self.settings.value("lcd_seven_segment", True, type=bool)
+        self.lcd_contrast = max(0.20, min(1.0, self.settings.value("lcd_contrast", 0.80, type=float)))
         
         if self.is_horizontal:
-            base_w = 40 + self.num_leds * 13 + (15 if self.fx_db_scale else 0)
-            base_h = 92 if self.fx_db_scale else 78
+            pitch = (11 + self.lcd_segment_gap) if self.theme_id in (6, 7) else 13
+            bar_w = 40 + int(self.num_leds * pitch) + (15 if self.fx_db_scale else 0)
+            readout_min_w = 380 if self.theme_id in (6, 7) else 0
+            base_w = max(bar_w, readout_min_w)
+            readout_extra = 22 if self.theme_id in (6, 7) else 0
+            base_h = (92 if self.fx_db_scale else 78) + readout_extra
         else:
+            pitch = (10 + self.lcd_segment_gap) if self.theme_id in (6, 7) else 13
             base_w = 125 if self.fx_db_scale else 100
-            base_h = 36 + self.num_leds * 13
+            readout_extra = 24 if self.theme_id in (6, 7) else 0
+            base_h = 36 + int(self.num_leds * pitch) + readout_extra
 
         self.resize(int(base_w * self.size_scale), int(base_h * self.size_scale))
         self.update()
@@ -571,7 +618,15 @@ class VuMeter(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
-        if self.theme_id == 5:
+        if self.theme_id == 6:
+            painter.setBrush(QColor(10, 26, 10, self.bg_opacity))
+            painter.setPen(QColor(20, 60, 20, 180))
+            painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), int(10 * self.size_scale), int(10 * self.size_scale))
+        elif self.theme_id == 7:
+            painter.setBrush(QColor(18, 10, 0, self.bg_opacity))
+            painter.setPen(QColor(60, 35, 0, 180))
+            painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), int(10 * self.size_scale), int(10 * self.size_scale))
+        elif self.theme_id == 5:
             painter.setBrush(QColor(10, 18, 21, self.bg_opacity))
             painter.setPen(QColor(0, 56, 64, 180))
             painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), int(10 * self.size_scale), int(10 * self.size_scale))
@@ -602,6 +657,9 @@ class VuMeter(QWidget):
                 painter.drawLine(start_x, y_l + int(led_h * 0.75), end_x, y_l + int(led_h * 0.75))
                 painter.drawLine(start_x, y_r + int(led_h * 0.25), end_x, y_r + int(led_h * 0.25))
                 painter.drawLine(start_x, y_r + int(led_h * 0.75), end_x, y_r + int(led_h * 0.75))
+            elif self.theme_id in (6, 7):
+                readout_y = (y_r + int(24 * self.size_scale))
+                self.draw_lcd_readout_horizontal(painter, start_x, readout_y, display_l, self.peak_l, display_r, self.peak_r)
         else:
             col_w = int(34 * self.size_scale)
             x_l = int(14 * self.size_scale)
@@ -619,6 +677,164 @@ class VuMeter(QWidget):
                 for x_col in (x_l, x_r):
                     painter.drawLine(x_col + int(col_w * 0.25), top_y, x_col + int(col_w * 0.25), end_y)
                     painter.drawLine(x_col + int(col_w * 0.75), top_y, x_col + int(col_w * 0.75), end_y)
+            elif self.theme_id in (6, 7):
+                top_y = int(22 * self.size_scale)
+                led_h = 10 * self.size_scale
+                gap = self.lcd_segment_gap * self.size_scale
+                end_y = top_y + int(self.num_leds * (led_h + gap) - gap)
+                readout_y = end_y + int(8 * self.size_scale)
+                self.draw_lcd_readout_vertical(painter, x_l, readout_y, col_w, display_l, self.peak_l, display_r, self.peak_r)
+
+    def get_lcd_colors(self):
+        """Calculate modulated active and ghost colors for LCD themes."""
+        if self.theme_id == 6:
+            base_active = (0x33, 0xFF, 0x66)
+            base_ghost = (0x0D, 0x2E, 0x14)
+        else: # Theme 7: Amber
+            base_active = (0xFF, 0xB0, 0x00)
+            base_ghost = (0x2E, 0x18, 0x00)
+
+        c = self.lcd_contrast
+        g = self.lcd_ghost_strength
+
+        active_color = QColor(int(base_active[0] * c), int(base_active[1] * c), int(base_active[2] * c))
+        ghost_color = QColor(int(base_ghost[0] * g), int(base_ghost[1] * g), int(base_ghost[2] * g))
+        return active_color, ghost_color
+
+    def draw_seven_segment_char(self, painter, ch, x, y, w, h, active_color, ghost_color):
+        """Draw a single seven-segment character glyph with active and ghost segment states."""
+        seven_seg_map = {
+            '0': (True, True, True, True, True, True, False),
+            '1': (False, True, True, False, False, False, False),
+            '2': (True, True, False, True, True, False, True),
+            '3': (True, True, True, True, False, False, True),
+            '4': (False, True, True, False, False, True, True),
+            '5': (True, False, True, True, False, True, True),
+            '6': (True, False, True, True, True, True, True),
+            '7': (True, True, True, False, False, False, False),
+            '8': (True, True, True, True, True, True, True),
+            '9': (True, True, True, True, False, True, True),
+            '-': (False, False, False, False, False, False, True),
+            'I': (False, True, True, False, False, False, False),
+            'N': (True, True, True, False, True, True, False),
+            'F': (True, False, False, False, True, True, True),
+            ' ': (False, False, False, False, False, False, False),
+        }
+        if ch == '.':
+            dot_sz = max(2, int(w * 0.35))
+            painter.fillRect(int(x), int(y + h - dot_sz), dot_sz, dot_sz, active_color)
+            return int(w * 0.45)
+        if ch == '+':
+            t = max(1, int(min(w, h) * 0.18))
+            half_h = h // 2
+            half_w = w // 2
+            painter.fillRect(int(x + half_w - t // 2), int(y + t), int(t), int(h - 2 * t), active_color)
+            painter.fillRect(int(x + t), int(y + half_h - t // 2), int(w - 2 * t), int(t), active_color)
+            return w
+
+        segs = seven_seg_map.get(ch, seven_seg_map[' '])
+        t = max(1, int(min(w, h) * 0.18))
+        half_h = h // 2
+        defs = [
+            (x + t, y, w - 2 * t, t, segs[0]),
+            (x + w - t, y + t, t, half_h - t, segs[1]),
+            (x + w - t, y + half_h, t, h - half_h - t, segs[2]),
+            (x + t, y + h - t, w - 2 * t, t, segs[3]),
+            (x, y + half_h, t, h - half_h - t, segs[4]),
+            (x, y + t, t, half_h - t, segs[5]),
+            (x + t, y + half_h - t // 2, w - 2 * t, t, segs[6]),
+        ]
+        for sx, sy, sw, sh, on in defs:
+            c = active_color if on else ghost_color
+            if c is not None and c.alpha() > 0:
+                painter.fillRect(int(sx), int(sy), int(sw), int(sh), c)
+        return w
+
+    def draw_seven_segment_string(self, painter, text, x, y, char_w, char_h, char_gap, active_color, ghost_color):
+        """Draw a text string using seven-segment glyphs."""
+        curr_x = x
+        for ch in text:
+            w_used = self.draw_seven_segment_char(painter, ch, curr_x, y, char_w, char_h, active_color, ghost_color)
+            curr_x += w_used + char_gap
+        return curr_x
+
+    def draw_lcd_readout_horizontal(self, painter, start_x, y, level_l, peak_l, level_r, peak_r):
+        """Render live and peak dB readouts in horizontal mode."""
+        active_color, ghost_color = self.get_lcd_colors()
+        def format_db(level):
+            if level <= 0.001:
+                return "-INF"
+            db = (level * 50.0) - 50.0
+            return f"{db:+.1f}" if db > -49.95 else "-INF"
+
+        str_l = f"L {format_db(level_l)}  PK {format_db(peak_l)}"
+        str_r = f"R {format_db(level_r)}  PK {format_db(peak_r)}"
+
+        if self.lcd_seven_segment:
+            cw = int(7 * self.size_scale)
+            ch = int(12 * self.size_scale)
+            cgap = int(2 * self.size_scale)
+
+            painter.setPen(active_color)
+            font = painter.font()
+            font.setBold(True)
+            font.setPointSizeF(max(6.0, 7.5 * self.size_scale))
+            painter.setFont(font)
+
+            painter.drawText(start_x, y + ch, "L:")
+            x_l = start_x + int(16 * self.size_scale)
+            x_l = self.draw_seven_segment_string(painter, format_db(level_l), x_l, y, cw, ch, cgap, active_color, ghost_color)
+            painter.drawText(x_l + int(6 * self.size_scale), y + ch, "PK:")
+            x_pk_l = x_l + int(28 * self.size_scale)
+            self.draw_seven_segment_string(painter, format_db(peak_l), x_pk_l, y, cw, ch, cgap, active_color, ghost_color)
+
+            x_r_start = x_pk_l + int(48 * self.size_scale)
+            painter.drawText(x_r_start, y + ch, "R:")
+            x_r = x_r_start + int(16 * self.size_scale)
+            x_r = self.draw_seven_segment_string(painter, format_db(level_r), x_r, y, cw, ch, cgap, active_color, ghost_color)
+            painter.drawText(x_r + int(6 * self.size_scale), y + ch, "PK:")
+            x_pk_r = x_r + int(28 * self.size_scale)
+            self.draw_seven_segment_string(painter, format_db(peak_r), x_pk_r, y, cw, ch, cgap, active_color, ghost_color)
+        else:
+            painter.setPen(active_color)
+            font = painter.font()
+            font.setBold(True)
+            font.setPointSizeF(max(6.5, 8.0 * self.size_scale))
+            painter.setFont(font)
+            full_text = f"{str_l}     {str_r}"
+            painter.drawText(start_x, y + int(11 * self.size_scale), full_text)
+
+    def draw_lcd_readout_vertical(self, painter, x_start, y, col_w, level_l, peak_l, level_r, peak_r):
+        """Render live and peak dB readouts in vertical mode."""
+        active_color, ghost_color = self.get_lcd_colors()
+        def format_db(level):
+            if level <= 0.001:
+                return "-INF"
+            db = (level * 50.0) - 50.0
+            return f"{db:+.1f}" if db > -49.95 else "-INF"
+
+        if self.lcd_seven_segment:
+            cw = int(6 * self.size_scale)
+            ch = int(10 * self.size_scale)
+            cgap = int(1.5 * self.size_scale)
+
+            self.draw_seven_segment_string(painter, format_db(level_l), x_start, y, cw, ch, cgap, active_color, ghost_color)
+            x_r = x_start + int(40 * self.size_scale)
+            self.draw_seven_segment_string(painter, format_db(level_r), x_r, y, cw, ch, cgap, active_color, ghost_color)
+
+            y_pk = y + ch + int(3 * self.size_scale)
+            self.draw_seven_segment_string(painter, format_db(peak_l), x_start, y_pk, cw, ch, cgap, active_color, ghost_color)
+            self.draw_seven_segment_string(painter, format_db(peak_r), x_r, y_pk, cw, ch, cgap, active_color, ghost_color)
+        else:
+            painter.setPen(active_color)
+            font = painter.font()
+            font.setBold(True)
+            font.setPointSizeF(max(6.0, 7.5 * self.size_scale))
+            painter.setFont(font)
+            painter.drawText(x_start, y + int(8 * self.size_scale), f"L:{format_db(level_l)}")
+            painter.drawText(x_start + int(40 * self.size_scale), y + int(8 * self.size_scale), f"R:{format_db(level_r)}")
+            painter.drawText(x_start, y + int(18 * self.size_scale), f"P:{format_db(peak_l)}")
+            painter.drawText(x_start + int(40 * self.size_scale), y + int(18 * self.size_scale), f"P:{format_db(peak_r)}")
 
     def draw_scale_horizontal(self, painter, start_x, y):
         """Draw dB tick marks and numerical labels for horizontal meter layout."""
@@ -640,7 +856,7 @@ class VuMeter(QWidget):
             (self.num_leds - 1, "0")
         ]
         led_w = 11 * self.size_scale
-        gap = 2 * self.size_scale
+        gap = (self.lcd_segment_gap * self.size_scale) if self.theme_id in (6, 7) else (2 * self.size_scale)
 
         for idx, label in marks:
             x = int(start_x + idx * (led_w + gap) + led_w / 2)
@@ -667,7 +883,7 @@ class VuMeter(QWidget):
             (0, "-∞")
         ]
         led_h = 10 * self.size_scale
-        gap = 3 * self.size_scale
+        gap = (self.lcd_segment_gap * self.size_scale) if self.theme_id in (6, 7) else (3 * self.size_scale)
 
         for idx_from_bottom, label in marks:
             idx_from_top = self.num_leds - 1 - idx_from_bottom
@@ -679,6 +895,10 @@ class VuMeter(QWidget):
         """Draw a single horizontal LED bar with active LEDs, peak indicator, and styling."""
         if self.theme_id == 5:
             painter.setPen(QColor(102, 192, 204))
+        elif self.theme_id == 6:
+            painter.setPen(QColor(51, 255, 102))
+        elif self.theme_id == 7:
+            painter.setPen(QColor(255, 176, 0))
         else:
             painter.setPen(QColor(255, 255, 255))
         font = painter.font()
@@ -687,12 +907,54 @@ class VuMeter(QWidget):
         painter.setFont(font)
         painter.drawText(int(15 * self.size_scale), y_offset + int(14 * self.size_scale), label)
         
+        if self.theme_id in (6, 7):
+            gap = self.lcd_segment_gap * self.size_scale
+        else:
+            gap = 2 * self.size_scale
+
         led_w = 11 * self.size_scale
         led_h = 18 * self.size_scale
-        gap = 2 * self.size_scale
         start_x = 35 * self.size_scale
 
-        if self.theme_id == 5:
+        if self.theme_id in (6, 7):
+            active_color, ghost_color = self.get_lcd_colors()
+            active_leds = int(level * self.num_leds)
+            peak_led = int(peak * self.num_leds)
+
+            for i in range(self.num_leds):
+                x = start_x + i * (led_w + gap)
+                is_on = i < active_leds
+
+                if is_on:
+                    painter.setBrush(active_color)
+                else:
+                    painter.setBrush(ghost_color if self.fx_ghost else QColor(0, 0, 0, 0))
+
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
+
+                if is_on and self.fx_glow:
+                    glow_c = QColor(active_color)
+                    glow_c.setAlpha(int(20 + level * 40))
+                    painter.setBrush(glow_c)
+                    painter.drawRect(int(x - 1), int(y_offset - 1), int(led_w + 2), int(led_h + 2))
+                    painter.setBrush(active_color)
+                    painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
+
+                if i == peak_led and peak_led > 0:
+                    if self.peak_mode == 1 or self.peak_mode == 0:
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(active_color)
+                        painter.drawRect(int(x - 1), int(y_offset - 1), int(led_w + 1), int(led_h + 1))
+                    elif self.peak_mode == 2:
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(QColor(255, 200, 0))
+                        painter.drawRect(int(x - 1), int(y_offset - 1), int(led_w + 1), int(led_h + 1))
+                    elif self.peak_mode == 3:
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(QColor(0, 230, 255))
+                        painter.drawRect(int(x - 1), int(y_offset - 1), int(led_w + 1), int(led_h + 1))
+        elif self.theme_id == 5:
             total_segments = self.num_leds * 4
             active_segments = int(level * total_segments)
             peak_segment = int(peak * total_segments)
@@ -819,6 +1081,10 @@ class VuMeter(QWidget):
         """Draw a single vertical tower of LEDs with active LEDs, peak indicator, and styling."""
         if self.theme_id == 5:
             painter.setPen(QColor(102, 192, 204))
+        elif self.theme_id == 6:
+            painter.setPen(QColor(51, 255, 102))
+        elif self.theme_id == 7:
+            painter.setPen(QColor(255, 176, 0))
         else:
             painter.setPen(QColor(255, 255, 255))
         font = painter.font()
@@ -827,12 +1093,55 @@ class VuMeter(QWidget):
         painter.setFont(font)
         painter.drawText(x_offset + int(col_w / 2 - 4 * self.size_scale), int(16 * self.size_scale), label)
 
+        if self.theme_id in (6, 7):
+            gap = self.lcd_segment_gap * self.size_scale
+        else:
+            gap = 3 * self.size_scale
+
         led_w = col_w
         led_h = 10 * self.size_scale
-        gap = 3 * self.size_scale
         start_y = 22 * self.size_scale
 
-        if self.theme_id == 5:
+        if self.theme_id in (6, 7):
+            active_color, ghost_color = self.get_lcd_colors()
+            active_leds = int(level * self.num_leds)
+            peak_led = int(peak * self.num_leds)
+
+            for idx_from_bottom in range(self.num_leds):
+                idx_from_top = self.num_leds - 1 - idx_from_bottom
+                y = start_y + idx_from_top * (led_h + gap)
+                is_on = idx_from_bottom < active_leds
+
+                if is_on:
+                    painter.setBrush(active_color)
+                else:
+                    painter.setBrush(ghost_color if self.fx_ghost else QColor(0, 0, 0, 0))
+
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.drawRect(int(x_offset), int(y), int(led_w), int(led_h))
+
+                if is_on and self.fx_glow:
+                    glow_c = QColor(active_color)
+                    glow_c.setAlpha(int(20 + level * 40))
+                    painter.setBrush(glow_c)
+                    painter.drawRect(int(x_offset - 1), int(y - 1), int(led_w + 2), int(led_h + 2))
+                    painter.setBrush(active_color)
+                    painter.drawRect(int(x_offset), int(y), int(led_w), int(led_h))
+
+                if idx_from_bottom == peak_led and peak_led > 0:
+                    if self.peak_mode == 1 or self.peak_mode == 0:
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(active_color)
+                        painter.drawRect(int(x_offset), int(y), int(led_w), int(led_h))
+                    elif self.peak_mode == 2:
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(QColor(255, 200, 0))
+                        painter.drawRect(int(x_offset), int(y), int(led_w), int(led_h))
+                    elif self.peak_mode == 3:
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(QColor(0, 230, 255))
+                        painter.drawRect(int(x_offset), int(y), int(led_w), int(led_h))
+        elif self.theme_id == 5:
             total_segments = self.num_leds * 4
             active_segments = int(level * total_segments)
             peak_segment = int(peak * total_segments)
