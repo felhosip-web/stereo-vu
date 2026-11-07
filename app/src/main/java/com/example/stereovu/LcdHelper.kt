@@ -47,6 +47,37 @@ object LcdHelper {
         return if (db > -49.95f) java.lang.String.format(Locale.US, "%+.1f", db) else "-INF"
     }
 
+    fun shouldRelayout(
+        oldScale: Float, newScale: Float,
+        oldLedCount: Int, newLedCount: Int,
+        oldHoriz: Boolean, newHoriz: Boolean,
+        oldDbScale: Boolean, newDbScale: Boolean,
+        oldTheme: Int, newTheme: Int,
+        oldGap: Float, newGap: Float,
+        oldSevenSegment: Boolean, newSevenSegment: Boolean
+    ): Boolean {
+        // Standard meter dimensions/layout changes
+        if (oldScale != newScale || oldLedCount != newLedCount || oldHoriz != newHoriz || oldDbScale != newDbScale) {
+            return true
+        }
+        val involvesLcd = (oldTheme in 6..7) || (newTheme in 6..7)
+        if (involvesLcd) {
+            // Theme transitions (LCD <-> non-LCD, or LCD Green <-> LCD Amber)
+            if (oldTheme != newTheme) {
+                return true
+            }
+            // Gap changes while in LCD theme affect segment pitch and layout size
+            if (oldGap != newGap) {
+                return true
+            }
+            // Seven-segment toggle while in LCD theme affects horizontal readout measurement
+            if (oldSevenSegment != newSevenSegment) {
+                return true
+            }
+        }
+        return false
+    }
+
     fun calculateHorizontalReadoutWidth(
         sevenSegment: Boolean,
         startX: Float = 40f,

@@ -25,6 +25,7 @@ class TestLcdAppearanceLinux(unittest.TestCase):
         self.orig_contrast = self.settings.value("lcd_contrast")
         self.orig_theme = self.settings.value("theme")
         self.orig_horiz = self.settings.value("horizontal")
+        self.orig_leds = self.settings.value("led_count")
 
     def tearDown(self):
         for key, orig in [
@@ -34,6 +35,7 @@ class TestLcdAppearanceLinux(unittest.TestCase):
             ("lcd_contrast", self.orig_contrast),
             ("theme", self.orig_theme),
             ("horizontal", self.orig_horiz),
+            ("led_count", self.orig_leds),
         ]:
             if orig is not None:
                 self.settings.setValue(key, orig)
@@ -172,46 +174,41 @@ class TestLcdAppearanceLinux(unittest.TestCase):
 
         self.assertGreater(h_gap5, h_gap1)
 
-    def test_actual_rendering_seven_segment_and_characters(self):
-        """7 & 8. Verify actual rendered pixels for '+', '-', '.', '0-9', '-INF'."""
+    def test_actual_pixel_rendering_all_characters(self):
+        """7 & 8. Verify actual rendered pixels for '+', '-', '.', digits '0'-'9', and '-INF'."""
         meter = stereo_vu.VuMeter()
         meter.theme_id = 6
         act_c, gst_c = meter.get_lcd_colors()
 
-        img = QImage(300, 100, QImage.Format.Format_ARGB32)
-        img.fill(QColor(0, 0, 0, 0))
-        p = QPainter(img)
+        # Characters to test individually
+        required_chars = ["+", "-", ".", "0", "1", "2", "3", "4", "5", "6", "7", "8", "9"]
+        for ch in required_chars:
+            p_img = QImage(24, 24, QImage.Format.Format_ARGB32)
+            p_img.fill(QColor(0, 0, 0, 0))
+            p = QPainter(p_img)
+            meter.draw_seven_segment_char(p, ch, 2, 2, 10, 16, act_c, QColor(0, 0, 0, 0))
+            p.end()
 
-        # Render plus glyph specifically with ghost_color transparent so only active pixels show
-        p_img = QImage(20, 20, QImage.Format.Format_ARGB32)
-        p_img.fill(QColor(0, 0, 0, 0))
-        painter_plus = QPainter(p_img)
-        meter.draw_seven_segment_char(painter_plus, '+', 2, 2, 10, 14, act_c, QColor(0, 0, 0, 0))
-        painter_plus.end()
+            active_pixels = sum(
+                1 for x in range(24) for y in range(24)
+                if p_img.pixelColor(x, y) == act_c
+            )
+            self.assertGreater(active_pixels, 0, f"Character '{ch}' must render active pixels")
 
-        # Count painted pixels for '+' matching act_c
-        plus_pixel_count = sum(
-            1 for x in range(20) for y in range(20)
-            if p_img.pixelColor(x, y) == act_c
-        )
-        self.assertGreater(plus_pixel_count, 0, "Plus glyph must draw visible active pixels")
+        # String tests: "+0.0" and "-INF"
+        for test_str in ["+0.0", "-INF", "-49.9"]:
+            s_img = QImage(120, 30, QImage.Format.Format_ARGB32)
+            s_img.fill(QColor(0, 0, 0, 0))
+            p = QPainter(s_img)
+            end_x = meter.draw_seven_segment_string(p, test_str, 5, 5, 8, 14, 2, act_c, QColor(0, 0, 0, 0))
+            p.end()
+            self.assertGreater(end_x, 5)
 
-        # Test string "+0.0"
-        str_img = QImage(100, 30, QImage.Format.Format_ARGB32)
-        str_img.fill(QColor(0, 0, 0, 0))
-        painter_str = QPainter(str_img)
-        end_plus = meter.draw_seven_segment_string(painter_str, "+0.0", 5, 5, 8, 14, 2, act_c, gst_c)
-        painter_str.end()
-        self.assertGreater(end_plus, 5)
-
-        # Test "-INF" string
-        inf_img = QImage(100, 30, QImage.Format.Format_ARGB32)
-        inf_img.fill(QColor(0, 0, 0, 0))
-        painter_inf = QPainter(inf_img)
-        end_inf = meter.draw_seven_segment_string(painter_inf, "-INF", 5, 5, 8, 14, 2, act_c, gst_c)
-        painter_inf.end()
-        self.assertGreater(end_inf, 5)
-        p.end()
+            pixels = sum(
+                1 for x in range(120) for y in range(30)
+                if s_img.pixelColor(x, y) == act_c
+            )
+            self.assertGreater(pixels, 0, f"String '{test_str}' must render active pixels")
 
     def test_horizontal_and_vertical_readout_bounds(self):
         """9. Horizontal and vertical readout bounds: must fit within widget width and height."""

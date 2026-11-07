@@ -246,6 +246,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         val oldDbScale = fxDbScale
         val oldTheme = themeId
         val oldGap = lcdSegmentGap
+        val oldSevenSegment = lcdSevenSegment
         peakNeverBelowBar = prefs.getBoolean("peak_never_below_bar", true)
         sizeScale = prefs.getFloat("size_scale", 1.0f)
         ledCount = prefs.getInt("led_count", 20)
@@ -326,7 +327,16 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                    else if (prefs.getBoolean("colored_peak", false)) 1 else 0
         setBackgroundColor(Color.argb(opacity, 0, 0, 0))
         updateThemeColors()
-        if (oldScale != sizeScale || oldLedCount != ledCount || oldHoriz != isHorizontal || oldDbScale != fxDbScale || (themeId in 6..7 && (oldTheme !in 6..7 || oldGap != lcdSegmentGap))) {
+        val needsRelayout = LcdHelper.shouldRelayout(
+            oldScale, sizeScale,
+            oldLedCount, ledCount,
+            oldHoriz, isHorizontal,
+            oldDbScale, fxDbScale,
+            oldTheme, themeId,
+            oldGap, lcdSegmentGap,
+            oldSevenSegment, lcdSevenSegment
+        )
+        if (needsRelayout) {
             requestLayout()
             params?.let { windowManager?.updateViewLayout(this, it) }
         }
