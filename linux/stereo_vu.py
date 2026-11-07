@@ -467,7 +467,9 @@ class VuMeter(QWidget):
         
         if self.is_horizontal:
             pitch = (11 + self.lcd_segment_gap) if self.theme_id in (6, 7) else 13
-            base_w = 40 + int(self.num_leds * pitch) + (15 if self.fx_db_scale else 0)
+            bar_w = 40 + int(self.num_leds * pitch) + (15 if self.fx_db_scale else 0)
+            readout_min_w = 380 if self.theme_id in (6, 7) else 0
+            base_w = max(bar_w, readout_min_w)
             readout_extra = 22 if self.theme_id in (6, 7) else 0
             base_h = (92 if self.fx_db_scale else 78) + readout_extra
         else:
@@ -722,6 +724,13 @@ class VuMeter(QWidget):
             dot_sz = max(2, int(w * 0.35))
             painter.fillRect(int(x), int(y + h - dot_sz), dot_sz, dot_sz, active_color)
             return int(w * 0.45)
+        if ch == '+':
+            t = max(1, int(min(w, h) * 0.18))
+            half_h = h // 2
+            half_w = w // 2
+            painter.fillRect(int(x + half_w - t // 2), int(y + t), int(t), int(h - 2 * t), active_color)
+            painter.fillRect(int(x + t), int(y + half_h - t // 2), int(w - 2 * t), int(t), active_color)
+            return w
 
         segs = seven_seg_map.get(ch, seven_seg_map[' '])
         t = max(1, int(min(w, h) * 0.18))
@@ -847,7 +856,7 @@ class VuMeter(QWidget):
             (self.num_leds - 1, "0")
         ]
         led_w = 11 * self.size_scale
-        gap = 2 * self.size_scale
+        gap = (self.lcd_segment_gap * self.size_scale) if self.theme_id in (6, 7) else (2 * self.size_scale)
 
         for idx, label in marks:
             x = int(start_x + idx * (led_w + gap) + led_w / 2)
@@ -874,7 +883,7 @@ class VuMeter(QWidget):
             (0, "-∞")
         ]
         led_h = 10 * self.size_scale
-        gap = 3 * self.size_scale
+        gap = (self.lcd_segment_gap * self.size_scale) if self.theme_id in (6, 7) else (3 * self.size_scale)
 
         for idx_from_bottom, label in marks:
             idx_from_top = self.num_leds - 1 - idx_from_bottom

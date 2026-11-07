@@ -333,15 +333,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         invalidate()
     }
 
-    private fun getLcdColors(): Pair<Int, Int> {
-        val baseActive = if (themeId == 6) arrayOf(0x33, 0xFF, 0x66) else arrayOf(0xFF, 0xB0, 0x00)
-        val baseGhost = if (themeId == 6) arrayOf(0x0D, 0x2E, 0x14) else arrayOf(0x2E, 0x18, 0x00)
-        val c = lcdContrast.coerceIn(0.20f, 1.0f)
-        val g = lcdGhostStrength.coerceIn(0.0f, 1.0f)
-        val act = Color.rgb((baseActive[0] * c).toInt(), (baseActive[1] * c).toInt(), (baseActive[2] * c).toInt())
-        val gst = Color.rgb((baseGhost[0] * g).toInt(), (baseGhost[1] * g).toInt(), (baseGhost[2] * g).toInt())
-        return Pair(act, gst)
-    }
+    fun getLcdColors(): Pair<Int, Int> = LcdHelper.getLcdColors(themeId, lcdContrast, lcdGhostStrength)
 
     private fun updateThemeColors() {
         when (themeId) {
@@ -399,7 +391,9 @@ class StereoVuView(context: Context) : FrameLayout(context) {
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
         val effectiveGap = if (themeId in 6..7) lcdSegmentGap else ledGap
         if (isHorizontal) {
-            val baseW = 40f + ledCount * (ledH + effectiveGap) + 20f
+            val barW = 40f + ledCount * (ledH + effectiveGap) + 20f
+            val minReadoutW = if (themeId in 6..7) LcdHelper.calculateHorizontalReadoutWidth(lcdSevenSegment) else 0f
+            val baseW = max(barW, minReadoutW)
             val readoutExtra = if (themeId in 6..7) 26f else 0f
             val baseH = (if (fxDbScale) (20f + colW + 16f + 20f + colW + 20f) else (20f + colW + 12f + colW + 20f)) + readoutExtra
             setMeasuredDimension((baseW * sizeScale).toInt(), (baseH * sizeScale).toInt())
@@ -498,7 +492,9 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         val yScale = yL + colW + 12f
         val yR = if (fxDbScale) (yScale + 16f) else (yL + colW + 12f)
         
-        val totalW = startX + ledCount * (ledH + effectiveGap) + 20f
+        val barW = startX + ledCount * (ledH + effectiveGap) + 20f
+        val minReadoutW = if (themeId in 6..7) LcdHelper.calculateHorizontalReadoutWidth(lcdSevenSegment) else 0f
+        val totalW = max(barW, minReadoutW)
         val totalH = yR + colW + 16f + readoutExtra
         
         val bezelRect = RectF(0f, 0f, totalW, totalH)
@@ -578,9 +574,10 @@ class StereoVuView(context: Context) : FrameLayout(context) {
             paintScaleText.color = Color.parseColor("#888888")
         }
 
+        val effectiveGap = if (themeId in 6..7) lcdSegmentGap else ledGap
         for (m in marks) {
             val idxFromTop = ledCount - 1 - m.ledIdxFromBottom
-            val centerY = startY + idxFromTop * (ledH + ledGap) + ledH / 2f
+            val centerY = startY + idxFromTop * (ledH + effectiveGap) + ledH / 2f
             c.drawLine(x, centerY, x + 5f, centerY, paintScaleTick)
             c.drawText(m.label, x + 7f, centerY + paintScaleText.textSize / 3f, paintScaleText)
         }
@@ -605,8 +602,9 @@ class StereoVuView(context: Context) : FrameLayout(context) {
             paintScaleText.color = Color.parseColor("#888888")
         }
         
+        val effectiveGap = if (themeId in 6..7) lcdSegmentGap else ledGap
         for (m in marks) {
-            val centerX = startX + m.ledIdx * (ledH + ledGap) + ledH / 2f
+            val centerX = startX + m.ledIdx * (ledH + effectiveGap) + ledH / 2f
             c.drawLine(centerX, y, centerX, y + 5f, paintScaleTick)
             
             val textWidth = paintScaleText.measureText(m.label)
@@ -629,33 +627,26 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         }
     }
 
-    private fun drawSevenSegmentChar(canvas: Canvas, ch: Char, x: Float, y: Float, w: Float, h: Float, activeColor: Int, ghostColor: Int): Float {
+    fun drawSevenSegmentChar(canvas: Canvas, ch: Char, x: Float, y: Float, w: Float, h: Float, activeColor: Int, ghostColor: Int): Float {
         val paintActive = Paint().apply { color = activeColor; style = Paint.Style.FILL }
         val paintGhost = Paint().apply { color = ghostColor; style = Paint.Style.FILL }
+        val t = max(1.2f, min(w, h) * 0.18f)
+        val halfH = h / 2f
+        val halfW = w / 2f
+
         if (ch == '.') {
             val dotSz = max(2f, w * 0.35f)
             canvas.drawRect(RectF(x, y + h - dotSz, x + dotSz, y + h), paintActive)
             return w * 0.45f
         }
-        val segMap = when (ch) {
-            '0' -> booleanArrayOf(true, true, true, true, true, true, false)
-            '1' -> booleanArrayOf(false, true, true, false, false, false, false)
-            '2' -> booleanArrayOf(true, true, false, true, true, false, true)
-            '3' -> booleanArrayOf(true, true, true, true, false, false, true)
-            '4' -> booleanArrayOf(false, true, true, false, false, true, true)
-            '5' -> booleanArrayOf(true, false, true, true, false, true, true)
-            '6' -> booleanArrayOf(true, false, true, true, true, true, true)
-            '7' -> booleanArrayOf(true, true, true, false, false, false, false)
-            '8' -> booleanArrayOf(true, true, true, true, true, true, true)
-            '9' -> booleanArrayOf(true, true, true, true, false, true, true)
-            '-' -> booleanArrayOf(false, false, false, false, false, false, true)
-            'I' -> booleanArrayOf(false, true, true, false, false, false, false)
-            'N' -> booleanArrayOf(true, true, true, false, true, true, false)
-            'F' -> booleanArrayOf(true, false, false, false, true, true, true)
-            else -> booleanArrayOf(false, false, false, false, false, false, false)
+        if (ch == '+') {
+            // Seven-segment display representation of '+'
+            canvas.drawRect(RectF(x + halfW - t / 2f, y + t, x + halfW + t / 2f, y + h - t), paintActive)
+            canvas.drawRect(RectF(x + t, y + halfH - t / 2f, x + w - t, y + halfH + t / 2f), paintActive)
+            return w
         }
-        val t = max(1.2f, min(w, h) * 0.18f)
-        val halfH = h / 2f
+
+        val segMap = LcdHelper.getSevenSegmentMap(ch)
         val segDefs = arrayOf(
             Pair(RectF(x + t, y, x + w - t, y + t), segMap[0]),
             Pair(RectF(x + w - t, y + t, x + w, y + halfH), segMap[1]),
@@ -685,11 +676,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
 
     private fun drawLcdReadoutHorizontal(canvas: Canvas, startX: Float, y: Float, levelL: Float, peakL: Float, levelR: Float, peakR: Float) {
         val (act, gst) = getLcdColors()
-        fun formatDb(level: Float): String {
-            if (level <= 0.001f) return "-INF"
-            val db = (level * 50f) - 50f
-            return if (db > -49.95f) java.lang.String.format(Locale.US, "%+.1f", db) else "-INF"
-        }
+        fun formatDb(level: Float): String = LcdHelper.formatDb(level)
 
         if (lcdSevenSegment) {
             val cw = 11f
@@ -731,11 +718,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
 
     private fun drawLcdReadoutVertical(canvas: Canvas, xStart: Float, y: Float, colW: Float, levelL: Float, peakL: Float, levelR: Float, peakR: Float) {
         val (act, gst) = getLcdColors()
-        fun formatDb(level: Float): String {
-            if (level <= 0.001f) return "-INF"
-            val db = (level * 50f) - 50f
-            return if (db > -49.95f) java.lang.String.format(Locale.US, "%+.1f", db) else "-INF"
-        }
+        fun formatDb(level: Float): String = LcdHelper.formatDb(level)
 
         if (lcdSevenSegment) {
             val cw = 9f

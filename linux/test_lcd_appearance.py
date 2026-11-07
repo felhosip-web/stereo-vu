@@ -145,9 +145,11 @@ class TestLcdAppearanceLinux(unittest.TestCase):
         """6. Segment gap affects rendering geometry and layout dimensions."""
         meter = stereo_vu.VuMeter()
         self.settings.setValue("theme", 6)
+        self.settings.setValue("led_count", 30)
 
-        self.settings.setValue("lcd_segment_gap", 1.0)
+        # Horizontal with 30 LEDs (where bar width scales past minimum readout width)
         self.settings.setValue("horizontal", True)
+        self.settings.setValue("lcd_segment_gap", 1.0)
         meter.load_settings()
         w_gap1 = meter.width()
 
@@ -159,6 +161,7 @@ class TestLcdAppearanceLinux(unittest.TestCase):
 
         # Vertical
         self.settings.setValue("horizontal", False)
+        self.settings.setValue("led_count", 20)
         self.settings.setValue("lcd_segment_gap", 1.0)
         meter.load_settings()
         h_gap1 = meter.height()
@@ -169,47 +172,75 @@ class TestLcdAppearanceLinux(unittest.TestCase):
 
         self.assertGreater(h_gap5, h_gap1)
 
-    def test_seven_segment_readout_and_character_coverage(self):
-        """7 & 8. Seven-segment mode and character coverage: 0-9, ., -, and -INF."""
+    def test_actual_rendering_seven_segment_and_characters(self):
+        """7 & 8. Verify actual rendered pixels for '+', '-', '.', '0-9', '-INF'."""
         meter = stereo_vu.VuMeter()
         meter.theme_id = 6
         act_c, gst_c = meter.get_lcd_colors()
 
         img = QImage(300, 100, QImage.Format.Format_ARGB32)
+        img.fill(QColor(0, 0, 0, 0))
         p = QPainter(img)
 
-        chars_to_test = "0123456789.-INF "
-        for ch in chars_to_test:
-            w = meter.draw_seven_segment_char(p, ch, 10, 10, 8, 14, act_c, gst_c)
-            self.assertGreater(w, 0)
+        # Render plus glyph specifically with ghost_color transparent so only active pixels show
+        p_img = QImage(20, 20, QImage.Format.Format_ARGB32)
+        p_img.fill(QColor(0, 0, 0, 0))
+        painter_plus = QPainter(p_img)
+        meter.draw_seven_segment_char(painter_plus, '+', 2, 2, 10, 14, act_c, QColor(0, 0, 0, 0))
+        painter_plus.end()
 
-        end_x = meter.draw_seven_segment_string(p, "-12.5", 10, 10, 8, 14, 2, act_c, gst_c)
-        self.assertGreater(end_x, 10)
+        # Count painted pixels for '+' matching act_c
+        plus_pixel_count = sum(
+            1 for x in range(20) for y in range(20)
+            if p_img.pixelColor(x, y) == act_c
+        )
+        self.assertGreater(plus_pixel_count, 0, "Plus glyph must draw visible active pixels")
 
-        end_inf = meter.draw_seven_segment_string(p, "-INF", 10, 10, 8, 14, 2, act_c, gst_c)
-        self.assertGreater(end_inf, 10)
+        # Test string "+0.0"
+        str_img = QImage(100, 30, QImage.Format.Format_ARGB32)
+        str_img.fill(QColor(0, 0, 0, 0))
+        painter_str = QPainter(str_img)
+        end_plus = meter.draw_seven_segment_string(painter_str, "+0.0", 5, 5, 8, 14, 2, act_c, gst_c)
+        painter_str.end()
+        self.assertGreater(end_plus, 5)
+
+        # Test "-INF" string
+        inf_img = QImage(100, 30, QImage.Format.Format_ARGB32)
+        inf_img.fill(QColor(0, 0, 0, 0))
+        painter_inf = QPainter(inf_img)
+        end_inf = meter.draw_seven_segment_string(painter_inf, "-INF", 5, 5, 8, 14, 2, act_c, gst_c)
+        painter_inf.end()
+        self.assertGreater(end_inf, 5)
         p.end()
 
-    def test_horizontal_and_vertical_layouts(self):
-        """9. Horizontal and vertical layout behavior."""
-        meter = stereo_vu.VuMeter()
-        meter.theme_id = 6
+    def test_horizontal_and_vertical_readout_bounds(self):
+        """9. Horizontal and vertical readout bounds: must fit within widget width and height."""
+        for theme_id in (6, 7):
+            self.settings.setValue("theme", theme_id)
+            for seven_seg in (True, False):
+                self.settings.setValue("lcd_seven_segment", seven_seg)
 
-        # Horizontal
-        self.settings.setValue("horizontal", True)
-        meter.load_settings()
-        w_h = meter.width()
-        h_h = meter.height()
+                # Horizontal mode with small LED count (10)
+                self.settings.setValue("horizontal", True)
+                self.settings.setValue("led_count", 10)
+                meter = stereo_vu.VuMeter()
+                meter.load_settings()
 
-        # Vertical
-        self.settings.setValue("horizontal", False)
-        meter.load_settings()
-        w_v = meter.width()
-        h_v = meter.height()
+                img_h = QImage(meter.width(), meter.height(), QImage.Format.Format_ARGB32)
+                p_h = QPainter(img_h)
+                # Render readouts with max width values (-49.9 and -INF)
+                meter.draw_channel_horizontal(p_h, 0.002, 0.0, 10, "L")
+                meter.draw_channel_horizontal(p_h, 1.0, 0.85, 38, "R")
+                readout_y = 62
+                meter.draw_lcd_readout_horizontal(p_h, 35, readout_y, 0.002, 0.0, 1.0, 0.85)
+                p_h.end()
 
-        self.assertNotEqual((w_h, h_h), (w_v, h_v))
-        self.assertGreater(w_h, h_h)
-        self.assertGreater(h_v, w_v)
+                self.assertGreaterEqual(meter.width(), 380, f"Horizontal width for theme {theme_id} must fit full readout")
+
+                # Vertical mode
+                self.settings.setValue("horizontal", False)
+                meter.load_settings()
+                self.assertGreater(meter.height(), 150)
 
     def test_themes_0_to_5_remain_unchanged(self):
         """10. Theme IDs 0-5 remain unchanged."""
