@@ -8,8 +8,17 @@ from PyQt6.QtWidgets import (QApplication, QWidget, QMenu, QDialog,
                              QTabWidget)
 from PyQt6.QtCore import Qt, QTimer, QPoint, QSettings
 from PyQt6.QtGui import QPainter, QColor, QAction
+from true_peak import TruePeakDetector, get_migrated_mode
 
 class SettingsDialog(QDialog):
+    """
+    Settings dialog window for Stereo VU Linux application.
+    Organized into 4 tabs:
+    - Tab 1: Detection & Ballistics
+    - Tab 2: Visual Effects
+    - Tab 3: Appearance & Layout
+    - Tab 4: General / Audio Device
+    """
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Stereo VU Beállítások")
@@ -42,8 +51,18 @@ class SettingsDialog(QDialog):
         layout1.addRow("RMS ablak (50-1000 ms):", rms_box)
 
         self.mode_combo = QComboBox()
-        self.mode_combo.addItems(["Digitális Peak", "Analóg VU", "PPM", "Egyéni"])
-        self.mode_combo.setCurrentIndex(self.settings.value("mode", 0, type=int))
+        self.mode_combo.addItems([
+            "Digitális Peak",
+            "Analóg VU",
+            "PPM",
+            "True Peak",
+            "Classic VU",
+            "BBC PPM",
+            "Nordic / DIN",
+            "Egyéni"
+        ])
+        initial_mode = get_migrated_mode(self.settings)
+        self.mode_combo.setCurrentIndex(initial_mode)
         layout1.addRow("Üzemmód (Ballisztika):", self.mode_combo)
 
         self.attack_slider = QSlider(Qt.Orientation.Horizontal)
@@ -73,6 +92,10 @@ class SettingsDialog(QDialog):
         self.peak_decay_slider.setRange(900, 995)
         self.peak_decay_slider.setValue(int(self.settings.value("peak_decay", 0.985, type=float) * 1000))
         layout1.addRow("Peak lecsengés (0.900-0.995):", self.peak_decay_slider)
+
+        self.peak_never_below_check = QCheckBox("Bekapcsolva")
+        self.peak_never_below_check.setChecked(self.settings.value("peak_never_below_bar", True, type=bool))
+        layout1.addRow("Peak soha nem megy a sáv alá:", self.peak_never_below_check)
 
         self.spring_slider = QSlider(Qt.Orientation.Horizontal)
         self.spring_slider.setRange(5, 40)
@@ -220,6 +243,7 @@ class SettingsDialog(QDialog):
         main_layout.addLayout(btn_layout)
 
     def save_settings(self):
+        """Persist current dialog selections and parameters to QSettings."""
         self.settings.setValue("input_device", self.device_combo.currentData())
         self.settings.setValue("detection_mode", self.detection_combo.currentIndex())
         self.settings.setValue("rms_window_ms", self.rms_window_slider.value())
@@ -234,6 +258,7 @@ class SettingsDialog(QDialog):
         self.settings.setValue("peak_hold_ms", self.peak_hold_slider.value())
         self.settings.setValue("peak_hold", self.peak_hold_slider.value())
         self.settings.setValue("peak_decay", self.peak_decay_slider.value() / 1000.0)
+        self.settings.setValue("peak_never_below_bar", self.peak_never_below_check.isChecked())
         self.settings.setValue("analog_spring", self.spring_slider.value() / 100.0)
         self.settings.setValue("analog_damp", self.damp_slider.value() / 100.0)
         self.settings.setValue("attack_speed", self.attack_slider.value() / 100.0)
@@ -246,6 +271,11 @@ class SettingsDialog(QDialog):
         self.accept()
 
 class VuMeter(QWidget):
+    """
+    Real-time frameless floating Stereo VU Meter widget.
+    Features 8 professional ballistics modes, True Peak FIR oversampling,
+    true RMS sliding window calculation, and customizable visual styles.
+    """
     def __init__(self):
         super().__init__()
         self.setWindowFlags(
@@ -258,6 +288,7 @@ class VuMeter(QWidget):
         self.settings = QSettings("StereoVU", "LinuxApp")
         self.sample_rate = 44100
         self.rms_history = None
+        self.true_peak_detector = TruePeakDetector()
         self.rms_history_idx = 0
         self.rms_history_count = 0
         self.rms_window_samples = int(self.sample_rate * 0.35)
@@ -275,6 +306,8 @@ class VuMeter(QWidget):
         self.peak_r = 0.0
         self.peak_hold_l = 0
         self.peak_hold_r = 0
+        self.bbc_step_timer_l = 0
+        self.bbc_step_timer_r = 0
         
         self.drag_pos = QPoint()
         self.timer = QTimer()
@@ -285,6 +318,7 @@ class VuMeter(QWidget):
         self.start_audio_stream()
 
     def init_rms_buffer(self, window_ms):
+        """Initialize or resize sliding window buffer for true RMS calculation."""
         window_ms = max(50, min(1000, window_ms))
         needed_samples = int(self.sample_rate * (window_ms / 1000.0))
         if self.rms_history is None or self.rms_history.shape[0] != needed_samples:
@@ -294,6 +328,7 @@ class VuMeter(QWidget):
             self.rms_history_count = 0
 
     def start_audio_stream(self):
+        """Start sounddevice input audio stream from selected or default audio device."""
         if self.stream is not None:
             self.stream.stop()
             self.stream.close()
@@ -326,7 +361,8 @@ class VuMeter(QWidget):
                     print(f"Failed to start fallback audio stream: {e2}")
 
     def load_settings(self):
-        self.mode = self.settings.value("mode", 0, type=int)
+        """Load and apply persisted preferences and ballistics parameters from QSettings."""
+        self.mode = get_migrated_mode(self.settings)
         self.num_leds = self.settings.value("led_count", 20, type=int)
         self.theme_id = self.settings.value("theme", 0, type=int)
         self.size_scale = self.settings.value("size_scale", 1.0, type=float)
@@ -342,19 +378,7 @@ class VuMeter(QWidget):
         else:
             self.peak_mode = 1 if self.settings.value("colored_peak", False, type=bool) else 0
             
-        if self.mode == 0: # Digital Peak: gyorsabb felfutás, lassabb karakteres lecsengés
-            self.attack_speed = 0.90
-            self.decay_speed = 0.12
-        elif self.mode == 1: # Analog
-            self.attack_speed = 0.10
-            self.decay_speed = 0.05
-        elif self.mode == 2: # PPM
-            self.attack_speed = 0.40
-            self.decay_speed = 0.08
-        else:
-            self.attack_speed = self.settings.value("attack_speed", 0.35, type=float)
-            self.decay_speed = self.settings.value("decay_speed", 0.12, type=float)
-            
+        # 1. Load general user-configured values FIRST
         self.digital_gain = self.settings.value("gain", 1.0, type=float)
         self.target_decay = self.settings.value("target_decay", 0.94, type=float)
         saved_peak_hold = self.settings.value("peak_hold_ms", self.settings.value("peak_hold", 900, type=int), type=int)
@@ -366,6 +390,35 @@ class VuMeter(QWidget):
         self.analog_spring = self.settings.value("analog_spring", 0.15, type=float)
         self.analog_damp = self.settings.value("analog_damp", 0.25, type=float)
 
+        # 2. Configure ballistics parameters AFTER general preferences
+        if self.mode == 0: # Digital Peak
+            self.attack_speed = 0.90
+            self.decay_speed = 0.12
+        elif self.mode == 1: # Analog VU (uses user-defined analog_spring / analog_damp)
+            self.attack_speed = 0.10
+            self.decay_speed = 0.05
+        elif self.mode == 2: # PPM
+            self.attack_speed = 0.40
+            self.decay_speed = 0.08
+        elif self.mode == 3: # True Peak
+            self.attack_speed = 0.95
+            self.decay_speed = 0.15
+        elif self.mode == 4: # Classic VU (dedicated spring/damp, not overwritten by Analog VU settings)
+            self.attack_speed = 0.08
+            self.decay_speed = 0.04
+            self.analog_spring = 0.10
+            self.analog_damp = 0.32
+        elif self.mode == 5: # BBC PPM
+            self.attack_speed = 0.45
+            self.decay_speed = 0.06
+        elif self.mode == 6: # Nordic / DIN
+            self.attack_speed = 0.55
+            self.decay_speed = 0.14
+        else: # Custom
+            self.attack_speed = self.settings.value("attack_speed", 0.35, type=float)
+            self.decay_speed = self.settings.value("decay_speed", 0.12, type=float)
+
+        self.peak_never_below_bar = self.settings.value("peak_never_below_bar", True, type=bool)
         self.fx_glow = self.settings.value("fx_glow", True, type=bool)
         self.fx_sheen = self.settings.value("fx_sheen", True, type=bool)
         self.fx_ghost = self.settings.value("fx_ghost", True, type=bool)
@@ -382,10 +435,13 @@ class VuMeter(QWidget):
         self.update()
 
     def audio_callback(self, indata, frames, time, status):
-        # Peak detection: true peak of the current audio buffer (max absolute sample)
-        # Fast, direct, responsive
-        peak_l = float(np.max(np.abs(indata[:, 0]))) if frames > 0 else 0.0
-        peak_r = float(np.max(np.abs(indata[:, 1]))) if frames > 0 else 0.0
+        """Audio stream callback: compute peak/True Peak and RMS values from incoming PCM buffer."""
+        # True Peak detection if mode == 3, otherwise standard sample peak
+        if self.mode == 3 and frames > 0:
+            peak_l, peak_r = self.true_peak_detector.process_buffer(indata[:, 0], indata[:, 1])
+        else:
+            peak_l = float(np.max(np.abs(indata[:, 0]))) if frames > 0 else 0.0
+            peak_r = float(np.max(np.abs(indata[:, 1]))) if frames > 0 else 0.0
 
         # True RMS calculation over sliding window (independent from peak)
         if self.detection_mode == 1:
@@ -432,7 +488,9 @@ class VuMeter(QWidget):
         self.target_r = min(1.0, max(self.target_r, new_target_r))
 
     def update_meter(self):
-        if self.mode == 1:
+        """60 FPS physics update loop for ballistics decay, spring simulation, and peak hold."""
+        if self.mode == 1 or self.mode == 4:
+            # 1: Analog VU, 4: Classic VU
             self.vel_l += (self.target_l - self.level_l) * self.analog_spring
             self.vel_l *= (1.0 - self.analog_damp)
             self.level_l += self.vel_l
@@ -443,6 +501,27 @@ class VuMeter(QWidget):
             
             self.level_l = max(0.0, min(1.2, self.level_l))
             self.level_r = max(0.0, min(1.2, self.level_r))
+        elif self.mode == 5:
+            # BBC PPM: stepped / multi-stage release
+            if self.target_l > self.level_l:
+                self.level_l += (self.target_l - self.level_l) * self.attack_speed
+                self.bbc_step_timer_l = 0
+            else:
+                self.bbc_step_timer_l += 1
+                if self.bbc_step_timer_l >= 3:
+                    drop = max(0.008, self.level_l * 0.05)
+                    self.level_l = max(self.target_l, self.level_l - drop)
+                    self.bbc_step_timer_l = 0
+
+            if self.target_r > self.level_r:
+                self.level_r += (self.target_r - self.level_r) * self.attack_speed
+                self.bbc_step_timer_r = 0
+            else:
+                self.bbc_step_timer_r += 1
+                if self.bbc_step_timer_r >= 3:
+                    drop = max(0.008, self.level_r * 0.05)
+                    self.level_r = max(self.target_r, self.level_r - drop)
+                    self.bbc_step_timer_r = 0
         else:
             if self.target_l > self.level_l:
                 self.level_l += (self.target_l - self.level_l) * self.attack_speed
@@ -457,19 +536,30 @@ class VuMeter(QWidget):
         display_l = max(0.0, min(1.0, self.level_l))
         display_r = max(0.0, min(1.0, self.level_r))
 
-        if display_l > self.peak_l:
+        if display_l >= self.peak_l:
             self.peak_l = display_l
             self.peak_hold_l = self.peak_hold_time
         else:
-            if self.peak_hold_l > 0: self.peak_hold_l -= 1
-            else: self.peak_l *= self.peak_decay_rate
+            if self.peak_hold_l > 0:
+                self.peak_hold_l -= 1
+            else:
+                self.peak_l *= self.peak_decay_rate
             
-        if display_r > self.peak_r:
+        if display_r >= self.peak_r:
             self.peak_r = display_r
             self.peak_hold_r = self.peak_hold_time
         else:
-            if self.peak_hold_r > 0: self.peak_hold_r -= 1
-            else: self.peak_r *= self.peak_decay_rate
+            if self.peak_hold_r > 0:
+                self.peak_hold_r -= 1
+            else:
+                self.peak_r *= self.peak_decay_rate
+
+        # Peak never below bar guarantee
+        if self.peak_never_below_bar:
+            if self.peak_l < display_l:
+                self.peak_l = display_l
+            if self.peak_r < display_r:
+                self.peak_r = display_r
 
         self.target_l *= self.target_decay
         self.target_r *= self.target_decay
@@ -477,6 +567,7 @@ class VuMeter(QWidget):
         self.update()
 
     def paintEvent(self, event):
+        """Render VU meter towers, LEDs, scales, and frame chrome."""
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         
@@ -530,6 +621,7 @@ class VuMeter(QWidget):
                     painter.drawLine(x_col + int(col_w * 0.75), top_y, x_col + int(col_w * 0.75), end_y)
 
     def draw_scale_horizontal(self, painter, start_x, y):
+        """Draw dB tick marks and numerical labels for horizontal meter layout."""
         if self.theme_id == 5:
             painter.setPen(QColor(77, 174, 184, 200))
         else:
@@ -556,6 +648,7 @@ class VuMeter(QWidget):
             painter.drawText(x - int(8 * self.size_scale), y + int(10 * self.size_scale), label)
 
     def draw_scale_vertical(self, painter, x, start_y):
+        """Draw dB tick marks and numerical labels for vertical tower layout."""
         if self.theme_id == 5:
             painter.setPen(QColor(77, 174, 184, 200))
         else:
@@ -583,6 +676,7 @@ class VuMeter(QWidget):
             painter.drawText(x + int(6 * self.size_scale), y + int(4 * self.size_scale), label)
 
     def draw_channel_horizontal(self, painter, level, peak, y_offset, label):
+        """Draw a single horizontal LED bar with active LEDs, peak indicator, and styling."""
         if self.theme_id == 5:
             painter.setPen(QColor(102, 192, 204))
         else:
@@ -722,6 +816,7 @@ class VuMeter(QWidget):
                         painter.drawRect(int(x), int(y_offset), int(led_w), int(led_h))
 
     def draw_channel_vertical(self, painter, level, peak, x_offset, col_w, label):
+        """Draw a single vertical tower of LEDs with active LEDs, peak indicator, and styling."""
         if self.theme_id == 5:
             painter.setPen(QColor(102, 192, 204))
         else:

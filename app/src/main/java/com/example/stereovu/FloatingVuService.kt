@@ -24,12 +24,15 @@ class FloatingVuService : Service() {
     private var running = true
     @Volatile private var amplitudeCount = 32767.0
     @Volatile private var detectionMode = 0 // 0 = Peak, 1 = RMS
+    @Volatile private var ballisticsMode = 0 // 0..7 (3 = True Peak)
     @Volatile private var rmsWindowMs = 350 // Default 350 ms (50 - 1000 ms)
+    private val truePeakDetector = TruePeakDetector()
 
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
         when (key) {
             "amplitude_count" -> amplitudeCount = prefs.getInt("amplitude_count", 32767).toDouble()
             "detection_mode" -> detectionMode = prefs.getInt("detection_mode", 0)
+            "mode" -> ballisticsMode = BallisticsModeMigration.getMigratedMode(prefs)
             "rms_window_ms" -> rmsWindowMs = prefs.getInt("rms_window_ms", 350).coerceIn(50, 1000)
         }
     }
@@ -41,6 +44,7 @@ class FloatingVuService : Service() {
         val prefs = getSharedPreferences("StereoVuPrefs", Context.MODE_PRIVATE)
         amplitudeCount = prefs.getInt("amplitude_count", 32767).toDouble()
         detectionMode = prefs.getInt("detection_mode", 0)
+        ballisticsMode = BallisticsModeMigration.getMigratedMode(prefs)
         rmsWindowMs = prefs.getInt("rms_window_ms", 350).coerceIn(50, 1000)
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
         
@@ -57,6 +61,7 @@ class FloatingVuService : Service() {
         val prefs = getSharedPreferences("StereoVuPrefs", Context.MODE_PRIVATE)
         amplitudeCount = prefs.getInt("amplitude_count", 32767).toDouble()
         detectionMode = prefs.getInt("detection_mode", 0)
+        ballisticsMode = BallisticsModeMigration.getMigratedMode(prefs)
         rmsWindowMs = prefs.getInt("rms_window_ms", 350).coerceIn(50, 1000)
         
         showOverlay()
@@ -189,6 +194,7 @@ class FloatingVuService : Service() {
                         // Fast, responsive attack
                         var peakMaxL = 0.0
                         var peakMaxR = 0.0
+                        val isTruePeak = (ballisticsMode == 3)
 
                         val reqWindowMs = rmsWindowMs.coerceIn(50, 1000)
                         if (reqWindowMs != lastWindowMs) {
@@ -204,10 +210,19 @@ class FloatingVuService : Service() {
                         while (i < read - 1) {
                             val l = buffer[i].toDouble() / maxAmp
                             val r = buffer[i + 1].toDouble() / maxAmp
-                            val absL = Math.abs(l)
-                            val absR = Math.abs(r)
-                            if (absL > peakMaxL) peakMaxL = absL
-                            if (absR > peakMaxR) peakMaxR = absR
+
+                            if (isTruePeak) {
+                                truePeakDetector.processSample(l, r)
+                                val sPeakL = truePeakDetector.lastPeakL
+                                val sPeakR = truePeakDetector.lastPeakR
+                                if (sPeakL > peakMaxL) peakMaxL = sPeakL
+                                if (sPeakR > peakMaxR) peakMaxR = sPeakR
+                            } else {
+                                val absL = Math.abs(l)
+                                val absR = Math.abs(r)
+                                if (absL > peakMaxL) peakMaxL = absL
+                                if (absR > peakMaxR) peakMaxR = absR
+                            }
 
                             val sqL = l * l
                             val sqR = r * r
