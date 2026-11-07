@@ -9,6 +9,7 @@ from PyQt6.QtWidgets import (QApplication, QWidget, QMenu, QDialog,
 from PyQt6.QtCore import Qt, QTimer, QPoint, QSettings
 from PyQt6.QtGui import QPainter, QColor, QAction
 from true_peak import TruePeakDetector, get_migrated_mode
+import vfd_helper
 
 class SettingsDialog(QDialog):
     """
@@ -627,7 +628,7 @@ class VuMeter(QWidget):
             painter.setPen(QColor(60, 35, 0, 180))
             painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), int(10 * self.size_scale), int(10 * self.size_scale))
         elif self.theme_id == 5:
-            painter.setBrush(QColor(10, 18, 21, self.bg_opacity))
+            painter.setBrush(QColor(vfd_helper.COLOR_BACKGROUND_RGB[0], vfd_helper.COLOR_BACKGROUND_RGB[1], vfd_helper.COLOR_BACKGROUND_RGB[2], self.bg_opacity))
             painter.setPen(QColor(0, 56, 64, 180))
             painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), int(10 * self.size_scale), int(10 * self.size_scale))
         else:
@@ -839,7 +840,7 @@ class VuMeter(QWidget):
     def draw_scale_horizontal(self, painter, start_x, y):
         """Draw dB tick marks and numerical labels for horizontal meter layout."""
         if self.theme_id == 5:
-            painter.setPen(QColor(77, 174, 184, 200))
+            painter.setPen(QColor(vfd_helper.COLOR_SCALE_TEXT_HEX))
         else:
             painter.setPen(QColor(160, 160, 160, 180))
         font = painter.font()
@@ -894,7 +895,7 @@ class VuMeter(QWidget):
     def draw_channel_horizontal(self, painter, level, peak, y_offset, label):
         """Draw a single horizontal LED bar with active LEDs, peak indicator, and styling."""
         if self.theme_id == 5:
-            painter.setPen(QColor(102, 192, 204))
+            painter.setPen(QColor(vfd_helper.COLOR_LABEL_HEX))
         elif self.theme_id == 6:
             painter.setPen(QColor(51, 255, 102))
         elif self.theme_id == 7:
@@ -955,24 +956,29 @@ class VuMeter(QWidget):
                         painter.setPen(QColor(0, 230, 255))
                         painter.drawRect(int(x - 1), int(y_offset - 1), int(led_w + 1), int(led_h + 1))
         elif self.theme_id == 5:
-            total_segments = self.num_leds * 4
-            active_segments = int(level * total_segments)
-            peak_segment = int(peak * total_segments)
+            active_segments = vfd_helper.calculate_active_subsegments(level, self.num_leds)
+            peak_segment = vfd_helper.calculate_peak_subsegment(peak, self.num_leds)
             
             sub_gap = 2 * self.size_scale
-            sub_w = (led_w - 3 * sub_gap) / 4.0
-            
-            base_color = QColor(0, 229, 255)
-            dim_color = QColor(0, 34, 40)
+            base_color = QColor(vfd_helper.COLOR_ACTIVE_HEX)
+            dim_color = QColor(vfd_helper.COLOR_INACTIVE_HEX)
             
             for i in range(self.num_leds):
-                x = start_x + i * (led_w + gap)
+                cell_left = start_x + i * (led_w + gap)
                 
-                for j in range(4):
-                    global_idx = i * 4 + j
+                for j in range(vfd_helper.SUBSEGMENTS_PER_CELL):
+                    global_idx = vfd_helper.get_global_subsegment_index(i, j)
                     is_on = global_idx < active_segments
                     
-                    sub_x = x + j * (sub_w + sub_gap)
+                    sub_x, sub_y, sub_w, sub_h = vfd_helper.calculate_subsegment_rect(
+                        is_horizontal=True,
+                        cell_left=cell_left,
+                        cell_top=y_offset,
+                        cell_width=led_w,
+                        cell_height=led_h,
+                        sub_index=j,
+                        sub_gap=sub_gap
+                    )
                     
                     if is_on:
                         painter.setBrush(base_color)
@@ -980,33 +986,25 @@ class VuMeter(QWidget):
                         painter.setBrush(dim_color if self.fx_ghost else QColor(0, 0, 0, 0))
                         
                     painter.setPen(Qt.PenStyle.NoPen)
-                    painter.drawRect(int(sub_x), int(y_offset), int(sub_w), int(led_h))
+                    painter.drawRect(int(sub_x), int(sub_y), int(sub_w), int(sub_h))
                     
                     if is_on and self.fx_glow:
                         glow_c = QColor(base_color)
                         glow_c.setAlpha(int(40 + level * 60))
                         painter.setBrush(glow_c)
-                        painter.drawRect(int(sub_x - 1), int(y_offset - 1), int(sub_w + 2), int(led_h + 2))
+                        painter.drawRect(int(sub_x - 1), int(sub_y - 1), int(sub_w + 2), int(sub_h + 2))
                         painter.setBrush(base_color)
-                        painter.drawRect(int(sub_x), int(y_offset), int(sub_w), int(led_h))
+                        painter.drawRect(int(sub_x), int(sub_y), int(sub_w), int(sub_h))
 
                     if is_on and self.fx_sheen:
                         painter.setBrush(QColor(255, 255, 255, 75))
-                        painter.drawRect(int(sub_x + 1), int(y_offset + 1), int(sub_w - 2), int(led_h * 0.4))
+                        painter.drawRect(int(sub_x + 1), int(sub_y + 1), int(max(0, sub_w - 2)), int(sub_h * 0.4))
 
                     if global_idx == peak_segment and peak_segment > 0:
-                        if self.peak_mode == 1 or self.peak_mode == 0:
-                            painter.setBrush(Qt.BrushStyle.NoBrush)
-                            painter.setPen(QColor(255, 255, 255))
-                            painter.drawRect(int(sub_x - 1), int(y_offset - 1), int(sub_w + 1), int(led_h + 1))
-                        elif self.peak_mode == 2:
-                            painter.setBrush(Qt.BrushStyle.NoBrush)
-                            painter.setPen(QColor(255, 200, 0))
-                            painter.drawRect(int(sub_x - 1), int(y_offset - 1), int(sub_w + 1), int(led_h + 1))
-                        elif self.peak_mode == 3:
-                            painter.setBrush(Qt.BrushStyle.NoBrush)
-                            painter.setPen(QColor(0, 230, 255))
-                            painter.drawRect(int(sub_x - 1), int(y_offset - 1), int(sub_w + 1), int(led_h + 1))
+                        peak_rgb = vfd_helper.get_peak_color_rgb(self.peak_mode)
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(QColor(peak_rgb[0], peak_rgb[1], peak_rgb[2]))
+                        painter.drawRect(int(sub_x - 1), int(sub_y - 1), int(sub_w + 1), int(sub_h + 1))
         else:
             active_leds = int(level * self.num_leds)
             peak_led = int(peak * self.num_leds)
@@ -1142,23 +1140,29 @@ class VuMeter(QWidget):
                         painter.setPen(QColor(0, 230, 255))
                         painter.drawRect(int(x_offset), int(y), int(led_w), int(led_h))
         elif self.theme_id == 5:
-            total_segments = self.num_leds * 4
-            active_segments = int(level * total_segments)
-            peak_segment = int(peak * total_segments)
+            active_segments = vfd_helper.calculate_active_subsegments(level, self.num_leds)
+            peak_segment = vfd_helper.calculate_peak_subsegment(peak, self.num_leds)
 
             sub_gap = 2 * self.size_scale
-            sub_w = (led_w - 3 * sub_gap) / 4.0
-            base_color = QColor(0, 212, 232)
-            dim_color = QColor(0, 31, 38)
+            base_color = QColor(vfd_helper.COLOR_ACTIVE_HEX)
+            dim_color = QColor(vfd_helper.COLOR_INACTIVE_HEX)
 
             for idx_from_bottom in range(self.num_leds):
                 idx_from_top = self.num_leds - 1 - idx_from_bottom
-                y = start_y + idx_from_top * (led_h + gap)
+                cell_top = start_y + idx_from_top * (led_h + gap)
 
-                for j in range(4):
-                    global_idx = idx_from_bottom * 4 + j
+                for j in range(vfd_helper.SUBSEGMENTS_PER_CELL):
+                    global_idx = vfd_helper.get_global_subsegment_index(idx_from_bottom, j)
                     is_on = global_idx < active_segments
-                    sub_x = x_offset + j * (sub_w + sub_gap)
+                    sub_x, sub_y, sub_w, sub_h = vfd_helper.calculate_subsegment_rect(
+                        is_horizontal=False,
+                        cell_left=x_offset,
+                        cell_top=cell_top,
+                        cell_width=led_w,
+                        cell_height=led_h,
+                        sub_index=j,
+                        sub_gap=sub_gap
+                    )
 
                     if is_on:
                         painter.setBrush(base_color)
@@ -1166,33 +1170,25 @@ class VuMeter(QWidget):
                         painter.setBrush(dim_color if self.fx_ghost else QColor(0, 0, 0, 0))
 
                     painter.setPen(Qt.PenStyle.NoPen)
-                    painter.drawRect(int(sub_x), int(y), int(sub_w), int(led_h))
+                    painter.drawRect(int(sub_x), int(sub_y), int(sub_w), int(sub_h))
 
                     if is_on and self.fx_glow:
                         glow_c = QColor(base_color)
                         glow_c.setAlpha(int(40 + level * 60))
                         painter.setBrush(glow_c)
-                        painter.drawRect(int(sub_x - 1), int(y - 1), int(sub_w + 2), int(led_h + 2))
+                        painter.drawRect(int(sub_x - 1), int(sub_y - 1), int(sub_w + 2), int(sub_h + 2))
                         painter.setBrush(base_color)
-                        painter.drawRect(int(sub_x), int(y), int(sub_w), int(led_h))
+                        painter.drawRect(int(sub_x), int(sub_y), int(sub_w), int(sub_h))
 
                     if is_on and self.fx_sheen:
                         painter.setBrush(QColor(255, 255, 255, 75))
-                        painter.drawRect(int(sub_x + 1), int(y + 1), int(sub_w - 2), int(led_h * 0.4))
+                        painter.drawRect(int(sub_x + 1), int(sub_y + 1), int(max(0, sub_w - 2)), int(sub_h * 0.4))
 
                     if global_idx == peak_segment and peak_segment > 0:
-                        if self.peak_mode == 1 or self.peak_mode == 0:
-                            painter.setBrush(Qt.BrushStyle.NoBrush)
-                            painter.setPen(QColor(255, 255, 255))
-                            painter.drawRect(int(sub_x - 1), int(y - 1), int(sub_w + 1), int(led_h + 1))
-                        elif self.peak_mode == 2:
-                            painter.setBrush(Qt.BrushStyle.NoBrush)
-                            painter.setPen(QColor(255, 200, 0))
-                            painter.drawRect(int(sub_x - 1), int(y - 1), int(sub_w + 1), int(led_h + 1))
-                        elif self.peak_mode == 3:
-                            painter.setBrush(Qt.BrushStyle.NoBrush)
-                            painter.setPen(QColor(0, 230, 255))
-                            painter.drawRect(int(sub_x - 1), int(y - 1), int(sub_w + 1), int(led_h + 1))
+                        peak_rgb = vfd_helper.get_peak_color_rgb(self.peak_mode)
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
+                        painter.setPen(QColor(peak_rgb[0], peak_rgb[1], peak_rgb[2]))
+                        painter.drawRect(int(sub_x - 1), int(sub_y - 1), int(sub_w + 1), int(sub_h + 1))
         else:
             active_leds = int(level * self.num_leds)
             peak_led = int(peak * self.num_leds)
