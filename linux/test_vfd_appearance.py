@@ -45,63 +45,95 @@ class TestVfdAppearance(unittest.TestCase):
         self.assertEqual(vfd_helper.get_peak_color_rgb(99), (255, 255, 255))
 
     def test_horizontal_subsegment_geometry_and_progression(self):
+        # Horizontal meter:
+        # Logical cell has width = led_w (12.0), height = led_h (70.0).
+        # 4 thin horizontal subsegments stacked vertically (divide cell along Y axis).
+        # Each subsegment occupies approximately 1/4 of cell height and full cell width.
+        # Progression within cell: bottom to top (sub_index 0 is bottom-most, 3 is top-most).
         cell_left = 40.0
         cell_top = 20.0
         cell_width = 12.0
         cell_height = 70.0
         sub_gap = 2.0
 
+        # Available height: 70 - 3 * 2 = 64.0, sub_h = 64 / 4 = 16.0
         r0 = vfd_helper.calculate_subsegment_rect(True, cell_left, cell_top, cell_width, cell_height, 0, sub_gap)
         r1 = vfd_helper.calculate_subsegment_rect(True, cell_left, cell_top, cell_width, cell_height, 1, sub_gap)
         r2 = vfd_helper.calculate_subsegment_rect(True, cell_left, cell_top, cell_width, cell_height, 2, sub_gap)
         r3 = vfd_helper.calculate_subsegment_rect(True, cell_left, cell_top, cell_width, cell_height, 3, sub_gap)
 
-        # Available width: 12 - 3 * 2 = 6, sub_w = 6 / 4 = 1.5
+        # All share the full width
         self.assertAlmostEqual(r0[0], 40.0)
-        self.assertAlmostEqual(r0[1], 20.0)
-        self.assertAlmostEqual(r0[2], 1.5)
-        self.assertAlmostEqual(r0[3], 70.0)
+        self.assertAlmostEqual(r0[2], 12.0)
+        self.assertAlmostEqual(r0[3], 16.0)
+        self.assertAlmostEqual(r1[2], 12.0)
+        self.assertAlmostEqual(r2[2], 12.0)
+        self.assertAlmostEqual(r3[2], 12.0)
 
-        self.assertAlmostEqual(r1[0], 43.5)
-        self.assertAlmostEqual(r2[0], 47.0)
-        self.assertAlmostEqual(r3[0], 50.5)
+        # Stacking order bottom to top:
+        # sub0: top = 20 + 3 * 18 = 74.0
+        self.assertAlmostEqual(r0[1], 74.0)
+        # sub1: top = 20 + 2 * 18 = 56.0
+        self.assertAlmostEqual(r1[1], 56.0)
+        # sub2: top = 20 + 1 * 18 = 38.0
+        self.assertAlmostEqual(r2[1], 38.0)
+        # sub3: top = 20 + 0 = 20.0
+        self.assertAlmostEqual(r3[1], 20.0)
 
-        # Monotonic progression left to right
-        self.assertTrue(r0[0] < r1[0] < r2[0] < r3[0])
+        # Progression bottom to top: y decreases as signal increases
+        self.assertTrue(r0[1] > r1[1] > r2[1] > r3[1])
         self.assertTrue(r0[2] > 0)
         self.assertTrue(r0[3] > 0)
 
     def test_vertical_subsegment_geometry_and_progression(self):
+        # Vertical meter:
+        # Logical cell has width = col_w (70.0), height = led_h (12.0).
+        # 4 narrow vertical subsegments side-by-side (divide cell along X axis).
+        # Each subsegment occupies approximately 1/4 of cell width and full cell height.
+        # Progression within cell: left to right (sub_index 0..3).
         cell_left = 14.0
         cell_top = 22.0
-        cell_width = 34.0
-        cell_height = 10.0
+        cell_width = 70.0
+        cell_height = 12.0
         sub_gap = 2.0
 
-        # Available height: 10 - 3 * 2 = 4, sub_h = 4 / 4 = 1.0
-        # Bottom-to-top progression:
-        # sub0 is lowest signal (at bottom), sub3 is highest signal (at top)
+        # Available width: 70 - 3 * 2 = 64.0, sub_w = 64 / 4 = 16.0
         r0 = vfd_helper.calculate_subsegment_rect(False, cell_left, cell_top, cell_width, cell_height, 0, sub_gap)
         r1 = vfd_helper.calculate_subsegment_rect(False, cell_left, cell_top, cell_width, cell_height, 1, sub_gap)
         r2 = vfd_helper.calculate_subsegment_rect(False, cell_left, cell_top, cell_width, cell_height, 2, sub_gap)
         r3 = vfd_helper.calculate_subsegment_rect(False, cell_left, cell_top, cell_width, cell_height, 3, sub_gap)
 
+        # All share the full height
+        self.assertAlmostEqual(r0[1], 22.0)
+        self.assertAlmostEqual(r0[3], 12.0)
+        self.assertAlmostEqual(r0[2], 16.0)
+        self.assertAlmostEqual(r1[3], 12.0)
+        self.assertAlmostEqual(r2[3], 12.0)
+        self.assertAlmostEqual(r3[3], 12.0)
+
+        # Side by side left to right:
+        # sub0: left = 14 + 0 = 14.0
         self.assertAlmostEqual(r0[0], 14.0)
-        self.assertAlmostEqual(r0[1], 31.0)
-        self.assertAlmostEqual(r0[2], 34.0)
-        self.assertAlmostEqual(r0[3], 1.0)
+        # sub1: left = 14 + 18 = 32.0
+        self.assertAlmostEqual(r1[0], 32.0)
+        # sub2: left = 14 + 36 = 50.0
+        self.assertAlmostEqual(r2[0], 50.0)
+        # sub3: left = 14 + 54 = 68.0
+        self.assertAlmostEqual(r3[0], 68.0)
 
-        self.assertAlmostEqual(r1[1], 28.0)
-        self.assertAlmostEqual(r2[1], 25.0)
-        self.assertAlmostEqual(r3[1], 22.0)
-
-        # Bottom to top progression: y decreases as signal increases
-        self.assertTrue(r0[1] > r1[1] > r2[1] > r3[1])
+        # Progression left to right: x increases as signal increases
+        self.assertTrue(r0[0] < r1[0] < r2[0] < r3[0])
+        self.assertTrue(r0[2] > 0)
+        self.assertTrue(r0[3] > 0)
 
     def test_small_dimension_safety(self):
-        r = vfd_helper.calculate_subsegment_rect(True, 10.0, 10.0, 2.0, 2.0, 0, 2.0)
-        self.assertGreaterEqual(r[2], 0.0)
-        self.assertGreaterEqual(r[3], 0.0)
+        r_horiz = vfd_helper.calculate_subsegment_rect(True, 10.0, 10.0, 2.0, 2.0, 0, 2.0)
+        self.assertEqual(r_horiz[2], 2.0)
+        self.assertEqual(r_horiz[3], 0.0)
+
+        r_vert = vfd_helper.calculate_subsegment_rect(False, 10.0, 10.0, 2.0, 2.0, 0, 2.0)
+        self.assertEqual(r_vert[2], 0.0)
+        self.assertEqual(r_vert[3], 2.0)
 
     def test_boundary_values(self):
         led_count = 20

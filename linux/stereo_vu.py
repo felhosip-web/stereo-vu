@@ -998,7 +998,7 @@ class VuMeter(QWidget):
 
                     if is_on and self.fx_sheen:
                         painter.setBrush(QColor(255, 255, 255, 75))
-                        painter.drawRect(int(sub_x + 1), int(sub_y + 1), int(max(0, sub_w - 2)), int(sub_h * 0.4))
+                        painter.drawRect(int(sub_x + 1), int(sub_y + 1), int(sub_w * 0.35), int(max(0, sub_h - 2)))
 
                     if global_idx == peak_segment and peak_segment > 0:
                         peak_rgb = vfd_helper.get_peak_color_rgb(self.peak_mode)

@@ -57,15 +57,20 @@ object VfdHelper {
     /**
      * Calculates the bounding rectangle of a subsegment within a logical cell.
      *
-     * In both vertical and horizontal meters, the subsegments divide the cell along the progression axis:
-     * - Horizontal: logical cell at [cellLeft, cellTop, cellLeft + cellW, cellTop + cellH]
-     *   Progression is left-to-right: subsegment j (0..3) occupies a horizontal slice.
-     *   subLeft = cellLeft + j * (subW + subGap)
-     * - Vertical: logical cell at [cellLeft, cellTop, cellLeft + cellW, cellTop + cellH]
-     *   Progression is bottom-to-top: subsegment j (0..3) occupies a vertical slice.
-     *   Since cellTop is the top of the cell and higher signal is towards top,
-     *   subsegment 0 (lowest) is at the bottom of the cell, and subsegment 3 (highest) is at the top:
-     *   subTop = cellTop + (3 - j) * (subH + subGap)
+     * Established Videoton VFD subsegment geometry:
+     * - Vertical meter:
+     *   Four narrow vertical subsegments side-by-side (divide cell along X axis).
+     *   Each subsegment occupies approximately one quarter of cell width and full cell height.
+     *   Progression within cell: left-to-right (subIndex 0..3).
+     *   subLeft = cellLeft + subIndex * (subW + subGap)
+     *   subTop = cellTop
+     *
+     * - Horizontal meter:
+     *   Four thin horizontal subsegments stacked vertically (divide cell along Y axis).
+     *   Each subsegment occupies approximately one quarter of cell height and full cell width.
+     *   Progression within cell: bottom-to-top (subIndex 0..3, 0 is bottom, 3 is top).
+     *   subTop = cellTop + (3 - subIndex) * (subH + subGap)
+     *   subLeft = cellLeft
      *
      * To prevent overlapping or negative dimensions when scaled down, subsegment width/height
      * are clamped to at least 0f.
@@ -81,8 +86,22 @@ object VfdHelper {
     ): RectCoords {
         val clampedSubIdx = subIndex.coerceIn(0, SUBSEGMENTS_PER_CELL - 1)
         return if (isHorizontal) {
-            // Horizontal meter: cell progresses horizontally (width = cellWidth, height = cellHeight)
-            // 4 subsegments along X axis
+            // Horizontal meter: 4 horizontal subsegments stacked vertically along Y axis
+            // Each subsegment has full cellWidth, and subH = (cellHeight - 3 * subGap) / 4
+            // Progression within cell: bottom to top (subIndex 0 is bottom-most, 3 is top-most)
+            val availableH = max(0f, cellHeight - (SUBSEGMENTS_PER_CELL - 1) * subGap)
+            val subH = availableH / SUBSEGMENTS_PER_CELL.toFloat()
+            val top = cellTop + (SUBSEGMENTS_PER_CELL - 1 - clampedSubIdx) * (subH + subGap)
+            RectCoords(
+                left = cellLeft,
+                top = top,
+                right = cellLeft + max(0f, cellWidth),
+                bottom = top + subH
+            )
+        } else {
+            // Vertical meter: 4 vertical subsegments side by side along X axis
+            // Each subsegment has full cellHeight, and subW = (cellWidth - 3 * subGap) / 4
+            // Progression within cell: left to right (subIndex 0 is left-most, 3 is right-most)
             val availableW = max(0f, cellWidth - (SUBSEGMENTS_PER_CELL - 1) * subGap)
             val subW = availableW / SUBSEGMENTS_PER_CELL.toFloat()
             val left = cellLeft + clampedSubIdx * (subW + subGap)
@@ -91,19 +110,6 @@ object VfdHelper {
                 top = cellTop,
                 right = left + subW,
                 bottom = cellTop + max(0f, cellHeight)
-            )
-        } else {
-            // Vertical meter: cell progresses vertically bottom-to-top
-            // 4 subsegments along Y axis
-            val availableH = max(0f, cellHeight - (SUBSEGMENTS_PER_CELL - 1) * subGap)
-            val subH = availableH / SUBSEGMENTS_PER_CELL.toFloat()
-            // subIndex 0 is bottom-most, 3 is top-most
-            val top = cellTop + (SUBSEGMENTS_PER_CELL - 1 - clampedSubIdx) * (subH + subGap)
-            RectCoords(
-                left = cellLeft,
-                top = top,
-                right = cellLeft + max(0f, cellWidth),
-                bottom = top + subH
             )
         }
     }

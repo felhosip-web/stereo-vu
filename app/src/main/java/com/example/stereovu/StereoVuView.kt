@@ -953,7 +953,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                             c.drawRoundRect(rect, r - 1f, r - 1f, paintGlow)
                         }
                         if (fxSheen) {
-                            val glareRect = RectF(rect.left + 1f, rect.top + 1f, rect.right - 1f, rect.top + rect.height() * 0.35f)
+                            val glareRect = RectF(rect.left + 1f, rect.top + 1f, rect.left + rect.width() * 0.35f, rect.bottom - 1f)
                             c.drawRoundRect(glareRect, r - 1f, r - 1f, paintSheen)
                         }
                     }

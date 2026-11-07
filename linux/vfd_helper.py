@@ -71,24 +71,39 @@ def calculate_subsegment_rect(is_horizontal, cell_left, cell_top, cell_width, ce
     """
     Calculates (left, top, width, height) of a subsegment within a logical cell.
 
-    Subsegments divide each logical cell along the signal progression axis:
-    - Horizontal: cell progresses left-to-right. Subsegment 0 is left-most, 3 is right-most.
-    - Vertical: cell progresses bottom-to-top. Subsegment 0 is bottom-most, 3 is top-most.
+    Established Videoton VFD subsegment geometry:
+    - Vertical meter:
+      Four narrow vertical subsegments side-by-side (divide cell along X axis).
+      Each subsegment occupies approximately one quarter of cell width and full cell height.
+      Progression within cell: left-to-right (sub_index 0..3).
+      sub_left = cell_left + sub_index * (sub_w + sub_gap)
+      sub_top = cell_top
+      sub_w = (cell_width - 3 * sub_gap) / 4
+      sub_h = cell_height
+
+    - Horizontal meter:
+      Four thin horizontal subsegments stacked vertically (divide cell along Y axis).
+      Each subsegment occupies approximately one quarter of cell height and full cell width.
+      Progression within cell: bottom-to-top (sub_index 0..3, 0 is bottom, 3 is top).
+      sub_top = cell_top + (3 - sub_index) * (sub_h + sub_gap)
+      sub_left = cell_left
+      sub_w = cell_width
+      sub_h = (cell_height - 3 * sub_gap) / 4
 
     Guarantees non-negative width and height even at small dimensions.
     """
     clamped_sub_idx = max(0, min(SUBSEGMENTS_PER_CELL - 1, sub_index))
     if is_horizontal:
+        avail_h = max(0.0, float(cell_height) - (SUBSEGMENTS_PER_CELL - 1) * float(sub_gap))
+        sub_h = avail_h / float(SUBSEGMENTS_PER_CELL)
+        # 0 is bottom-most, 3 is top-most
+        top = float(cell_top) + (SUBSEGMENTS_PER_CELL - 1 - clamped_sub_idx) * (sub_h + float(sub_gap))
+        return (float(cell_left), top, max(0.0, float(cell_width)), sub_h)
+    else:
         avail_w = max(0.0, float(cell_width) - (SUBSEGMENTS_PER_CELL - 1) * float(sub_gap))
         sub_w = avail_w / float(SUBSEGMENTS_PER_CELL)
         left = float(cell_left) + clamped_sub_idx * (sub_w + float(sub_gap))
         return (left, float(cell_top), sub_w, max(0.0, float(cell_height)))
-    else:
-        avail_h = max(0.0, float(cell_height) - (SUBSEGMENTS_PER_CELL - 1) * float(sub_gap))
-        sub_h = avail_h / float(SUBSEGMENTS_PER_CELL)
-        # 0 is bottom, 3 is top
-        top = float(cell_top) + (SUBSEGMENTS_PER_CELL - 1 - clamped_sub_idx) * (sub_h + float(sub_gap))
-        return (float(cell_left), top, max(0.0, float(cell_width)), sub_h)
 
 
 def get_global_subsegment_index(cell_index: int, sub_index: int) -> int:
