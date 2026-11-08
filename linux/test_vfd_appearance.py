@@ -135,6 +135,49 @@ class TestVfdAppearance(unittest.TestCase):
         self.assertEqual(r_vert[2], 0.0)
         self.assertEqual(r_vert[3], 2.0)
 
+    def test_all_supported_scales_produce_non_zero_dimensions_and_no_overlap(self):
+        test_scales = [0.50, 0.60, 0.79, 0.80, 0.99, 1.00, 1.50, 2.00]
+        for scale in test_scales:
+            sub_gap = 2.0 * scale if scale >= 1.0 else max(1.0, 2.0 * scale)
+
+            # Vertical test
+            col_w = int(34 * scale)
+            led_h = 10.0 * scale
+            vert_rects = []
+            for j in range(4):
+                sx, sy, sw, sh = vfd_helper.calculate_subsegment_rect(
+                    False, 14.0 * scale, 22.0 * scale, col_w, led_h, j, sub_gap
+                )
+                eff_w = max(1, int(sw))
+                eff_h = max(1, int(sh))
+                self.assertGreater(eff_w, 0, f"Vertical eff_w must be >0 at scale {scale}")
+                self.assertGreater(eff_h, 0, f"Vertical eff_h must be >0 at scale {scale}")
+                vert_rects.append((int(sx), int(sy), eff_w, eff_h))
+
+            for j in range(3):
+                curr = vert_rects[j]
+                next_rect = vert_rects[j + 1]
+                self.assertLessEqual(curr[0] + curr[2], next_rect[0], f"Vertical subsegments overlap at scale {scale}")
+
+            # Horizontal test
+            led_w = 11.0 * scale
+            led_h_horiz = 18.0 * scale
+            horiz_rects = []
+            for j in range(4):
+                sx, sy, sw, sh = vfd_helper.calculate_subsegment_rect(
+                    True, 35.0 * scale, 10.0 * scale, led_w, led_h_horiz, j, sub_gap
+                )
+                eff_w = max(1, int(sw))
+                eff_h = max(1, int(sh))
+                self.assertGreater(eff_w, 0, f"Horizontal eff_w must be >0 at scale {scale}")
+                self.assertGreater(eff_h, 0, f"Horizontal eff_h must be >0 at scale {scale}")
+                horiz_rects.append((int(sx), int(sy), eff_w, eff_h))
+
+            for j in range(3):
+                curr = horiz_rects[j]      # lower signal, larger top
+                next_rect = horiz_rects[j + 1]  # higher signal, smaller top
+                self.assertLessEqual(next_rect[1] + next_rect[3], curr[1], f"Horizontal subsegments overlap at scale {scale}")
+
     def test_boundary_values(self):
         led_count = 20
         total_subsegments = 80

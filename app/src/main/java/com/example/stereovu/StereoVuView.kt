@@ -605,8 +605,8 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         )
 
         if (themeId == 5) {
-            paintScaleTick.color = Color.parseColor("#006A75")
-            paintScaleText.color = Color.parseColor("#4DAEB8")
+            paintScaleTick.color = VfdHelper.COLOR_SCALE_TICK
+            paintScaleText.color = VfdHelper.COLOR_SCALE_TEXT
         } else {
             paintScaleTick.color = Color.parseColor("#666666")
             paintScaleText.color = Color.parseColor("#888888")

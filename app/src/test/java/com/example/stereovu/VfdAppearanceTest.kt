@@ -3,6 +3,7 @@ package com.example.stereovu
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.max
 
 class VfdAppearanceTest {
 
@@ -221,6 +222,68 @@ class VfdAppearanceTest {
         assertEquals(2f, rectVert.height, 0.001f)
         assertTrue(rectVert.right >= rectVert.left)
         assertTrue(rectVert.bottom >= rectVert.top)
+    }
+
+    @Test
+    fun testAllSupportedScalesProduceNonZeroDimensionsAndNoOverlap() {
+        val testScales = floatArrayOf(0.50f, 0.60f, 0.79f, 0.80f, 0.99f, 1.00f, 1.50f, 2.00f)
+        for (scale in testScales) {
+            val subGap = if (scale >= 1.0f) 2.0f * scale else max(1.0f, 2.0f * scale)
+
+            // Vertical test
+            val colW = (34f * scale)
+            val ledH = (10f * scale)
+            val vertRects = Array(4) { j ->
+                VfdHelper.calculateSubsegmentRect(
+                    isHorizontal = false,
+                    cellLeft = 14f * scale,
+                    cellTop = 22f * scale,
+                    cellWidth = colW,
+                    cellHeight = ledH,
+                    subIndex = j,
+                    subGap = subGap
+                )
+            }
+            for (j in 0 until 4) {
+                val r = vertRects[j]
+                val effW = max(1, r.width.toInt())
+                val effH = max(1, r.height.toInt())
+                assertTrue("Scale $scale vert sub $j effW > 0", effW > 0)
+                assertTrue("Scale $scale vert sub $j effH > 0", effH > 0)
+            }
+            for (j in 0 until 3) {
+                val curr = vertRects[j]
+                val next = vertRects[j + 1]
+                assertTrue("Scale $scale vert sub $j must not overlap $next", curr.right <= next.left + 0.001f)
+            }
+
+            // Horizontal test
+            val ledW = (11f * scale)
+            val ledHHoriz = (18f * scale)
+            val horizRects = Array(4) { j ->
+                VfdHelper.calculateSubsegmentRect(
+                    isHorizontal = true,
+                    cellLeft = 35f * scale,
+                    cellTop = 10f * scale,
+                    cellWidth = ledW,
+                    cellHeight = ledHHoriz,
+                    subIndex = j,
+                    subGap = subGap
+                )
+            }
+            for (j in 0 until 4) {
+                val r = horizRects[j]
+                val effW = max(1, r.width.toInt())
+                val effH = max(1, r.height.toInt())
+                assertTrue("Scale $scale horiz sub $j effW > 0", effW > 0)
+                assertTrue("Scale $scale horiz sub $j effH > 0", effH > 0)
+            }
+            for (j in 0 until 3) {
+                val curr = horizRects[j]       // lower signal, larger top
+                val next = horizRects[j + 1]   // higher signal, smaller top
+                assertTrue("Scale $scale horiz sub $j must not overlap $next", next.bottom <= curr.top + 0.001f)
+            }
+        }
     }
 
     @Test
