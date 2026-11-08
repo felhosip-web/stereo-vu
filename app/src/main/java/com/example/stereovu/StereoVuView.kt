@@ -364,8 +364,8 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                 paintOffGreen.color = Color.parseColor("#181008"); paintOffYellow.color = Color.parseColor("#180800"); paintOffRed.color = Color.parseColor("#180010")
             }
             5 -> { // VFD (Klasszikus Videoton Cián - meleg zöldes-cián és sötét teal)
-                val vfdCyan = Color.parseColor("#00D4E8")
-                val vfdDim = Color.parseColor("#001F26")
+                val vfdCyan = VfdHelper.COLOR_ACTIVE
+                val vfdDim = VfdHelper.COLOR_INACTIVE
                 paintGreen.color = vfdCyan; paintYellow.color = vfdCyan; paintRed.color = vfdCyan
                 paintOffGreen.color = vfdDim; paintOffYellow.color = vfdDim; paintOffRed.color = vfdDim
             }
@@ -437,13 +437,13 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         val bezelRect = RectF(0f, 0f, totalW, totalH)
 
         val bezelPaint = when (themeId) {
-            5 -> Paint().apply { color = Color.parseColor("#0A1215") }
+            5 -> Paint().apply { color = VfdHelper.COLOR_BACKGROUND }
             6 -> Paint().apply { color = Color.parseColor("#0A1A0A") }
             7 -> Paint().apply { color = Color.parseColor("#120A00") }
             else -> paintBezel
         }
         val borderPaint = when (themeId) {
-            5 -> Paint().apply { color = Color.parseColor("#003840"); style = Paint.Style.STROKE; strokeWidth = 2f }
+            5 -> Paint().apply { color = VfdHelper.COLOR_BORDER; style = Paint.Style.STROKE; strokeWidth = 2f }
             6 -> Paint().apply { color = Color.parseColor("#143D14"); style = Paint.Style.STROKE; strokeWidth = 2f }
             7 -> Paint().apply { color = Color.parseColor("#3D2400"); style = Paint.Style.STROKE; strokeWidth = 2f }
             else -> paintBezelBorder
@@ -453,7 +453,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
 
         val grooveX = xL + colW + 2f
         val groovePaint = when (themeId) {
-            5 -> Paint().apply { color = Color.parseColor("#040B0D") }
+            5 -> Paint().apply { color = VfdHelper.COLOR_GROOVE }
             6 -> Paint().apply { color = Color.parseColor("#050D05") }
             7 -> Paint().apply { color = Color.parseColor("#0D0600") }
             else -> paintGroove
@@ -462,7 +462,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         canvas.drawRoundRect(RectF(grooveX, topY - 4f, grooveX + 10f, towerBottom + 4f), 3f, 3f, groovePaint)
 
         paintChanLabel.color = when (themeId) {
-            5 -> Color.parseColor("#66C0CC")
+            5 -> VfdHelper.COLOR_LABEL
             6 -> Color.parseColor("#33FF66")
             7 -> Color.parseColor("#FFB000")
             else -> Color.WHITE
@@ -509,13 +509,13 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         
         val bezelRect = RectF(0f, 0f, totalW, totalH)
         val bezelPaint = when (themeId) {
-            5 -> Paint().apply { color = Color.parseColor("#0A1215") }
+            5 -> Paint().apply { color = VfdHelper.COLOR_BACKGROUND }
             6 -> Paint().apply { color = Color.parseColor("#0A1A0A") }
             7 -> Paint().apply { color = Color.parseColor("#120A00") }
             else -> paintBezel
         }
         val borderPaint = when (themeId) {
-            5 -> Paint().apply { color = Color.parseColor("#003840"); style = Paint.Style.STROKE; strokeWidth = 2f }
+            5 -> Paint().apply { color = VfdHelper.COLOR_BORDER; style = Paint.Style.STROKE; strokeWidth = 2f }
             6 -> Paint().apply { color = Color.parseColor("#143D14"); style = Paint.Style.STROKE; strokeWidth = 2f }
             7 -> Paint().apply { color = Color.parseColor("#3D2400"); style = Paint.Style.STROKE; strokeWidth = 2f }
             else -> paintBezelBorder
@@ -525,7 +525,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
 
         val grooveY = yL + colW + 2f
         val groovePaint = when (themeId) {
-            5 -> Paint().apply { color = Color.parseColor("#040B0D") }
+            5 -> Paint().apply { color = VfdHelper.COLOR_GROOVE }
             6 -> Paint().apply { color = Color.parseColor("#050D05") }
             7 -> Paint().apply { color = Color.parseColor("#0D0600") }
             else -> paintGroove
@@ -533,7 +533,7 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         canvas.drawRoundRect(RectF(startX - 4f, grooveY, totalW - 6f, grooveY + 8f), 3f, 3f, groovePaint)
 
         paintChanLabel.color = when (themeId) {
-            5 -> Color.parseColor("#66C0CC")
+            5 -> VfdHelper.COLOR_LABEL
             6 -> Color.parseColor("#33FF66")
             7 -> Color.parseColor("#FFB000")
             else -> Color.WHITE
@@ -577,8 +577,8 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         )
 
         if (themeId == 5) {
-            paintScaleTick.color = Color.parseColor("#006A75")
-            paintScaleText.color = Color.parseColor("#4DAEB8")
+            paintScaleTick.color = VfdHelper.COLOR_SCALE_TICK
+            paintScaleText.color = VfdHelper.COLOR_SCALE_TEXT
         } else {
             paintScaleTick.color = Color.parseColor("#666666")
             paintScaleText.color = Color.parseColor("#888888")
@@ -605,8 +605,8 @@ class StereoVuView(context: Context) : FrameLayout(context) {
         )
 
         if (themeId == 5) {
-            paintScaleTick.color = Color.parseColor("#006A75")
-            paintScaleText.color = Color.parseColor("#4DAEB8")
+            paintScaleTick.color = VfdHelper.COLOR_SCALE_TICK
+            paintScaleText.color = VfdHelper.COLOR_SCALE_TEXT
         } else {
             paintScaleTick.color = Color.parseColor("#666666")
             paintScaleText.color = Color.parseColor("#888888")
@@ -795,24 +795,27 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                 }
             }
         } else if (themeId == 5) {
-            val totalSegments = ledCount * 4
-            val activeSegments = (level * totalSegments).toInt()
-            val peakSegment = (peak * totalSegments).toInt().coerceIn(0, totalSegments - 1)
-            
-            // 4 sub-segments HORIZONTALLY per LED for the real VFD matrix look
+            val activeSegments = VfdHelper.calculateActiveSubsegments(level, ledCount)
+            val peakSegment = VfdHelper.calculatePeakSubsegment(peak, ledCount)
             val subGap = 2f
-            val subW = (colW - 3 * subGap) / 4f
 
             for (idxFromBottom in 0 until ledCount) {
                 val idxFromTop = ledCount - 1 - idxFromBottom
-                val top = topY + idxFromTop * (ledH + ledGap)
+                val cellTop = topY + idxFromTop * (ledH + ledGap)
                 
-                for (j in 0 until 4) {
-                    val globalIdx = idxFromBottom * 4 + j
+                for (j in 0 until VfdHelper.SUBSEGMENTS_PER_CELL) {
+                    val globalIdx = VfdHelper.getGlobalSubsegmentIndex(idxFromBottom, j)
                     val isOn = globalIdx < activeSegments
-                    
-                    val subLeft = x + j * (subW + subGap)
-                    val rect = RectF(subLeft, top, subLeft + subW, top + ledH)
+                    val subRect = VfdHelper.calculateSubsegmentRect(
+                        isHorizontal = false,
+                        cellLeft = x,
+                        cellTop = cellTop,
+                        cellWidth = colW,
+                        cellHeight = ledH,
+                        subIndex = j,
+                        subGap = subGap
+                    )
+                    val rect = RectF(subRect.left, subRect.top, subRect.right, subRect.bottom)
                     
                     val paint = if (isOn) paintGreen else (if (fxGhost) paintOffGreen else Paint().apply { color = Color.TRANSPARENT })
                     c.drawRoundRect(rect, r - 2f, r - 2f, paint)
@@ -821,18 +824,23 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                         if (fxGlow) {
                             val glowRadius = 10f + level * 10f
                             paintGlow.set(paint)
-                            paintGlow.setShadowLayer(glowRadius, 0f, 0f, Color.parseColor("#00D4E8"))
+                            paintGlow.setShadowLayer(glowRadius, 0f, 0f, VfdHelper.COLOR_ACTIVE)
                             c.drawRoundRect(rect, r - 2f, r - 2f, paintGlow)
                         }
                         if (fxSheen) {
-                            val glareRect = RectF(subLeft + 1f, top + 1f, subLeft + subW - 1f, top + ledH * 0.35f)
+                            val glareRect = RectF(rect.left + 1f, rect.top + 1f, rect.right - 1f, rect.top + rect.height() * 0.35f)
                             c.drawRoundRect(glareRect, r - 2f, r - 2f, paintSheen)
                         }
                     }
                     
                     if (globalIdx == peakSegment && peakAlpha > 0f && peak > 0.05f) {
-                        val pPaint = getPeakPaint(false, false)
-                        pPaint.alpha = peakAlpha.toInt().coerceIn(0, 255)
+                        val peakColor = VfdHelper.getPeakColor(peakMode)
+                        val pPaint = Paint().apply {
+                            color = peakColor
+                            style = Paint.Style.STROKE
+                            strokeWidth = 2.5f
+                            alpha = peakAlpha.toInt().coerceIn(0, 255)
+                        }
                         c.drawRoundRect(rect, r - 1f, r - 1f, pPaint)
                     }
                 }
@@ -913,24 +921,26 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                 }
             }
         } else if (themeId == 5) {
-            val totalSegments = ledCount * 4
-            val activeSegments = (level * totalSegments).toInt()
-            val peakSegment = (peak * totalSegments).toInt().coerceIn(0, totalSegments - 1)
-            
-            // For horizontal mode, sub-segments are stacked VERTICALLY within each horizontal block
+            val activeSegments = VfdHelper.calculateActiveSubsegments(level, ledCount)
+            val peakSegment = VfdHelper.calculatePeakSubsegment(peak, ledCount)
             val subGap = 2f
-            val subH = (colW - 3 * subGap) / 4f
 
             for (i in 0 until ledCount) {
-                val left = startX + i * (ledH + ledGap)
+                val cellLeft = startX + i * (ledH + ledGap)
                 
-                for (j in 0 until 4) {
-                    val globalIdx = i * 4 + j
+                for (j in 0 until VfdHelper.SUBSEGMENTS_PER_CELL) {
+                    val globalIdx = VfdHelper.getGlobalSubsegmentIndex(i, j)
                     val isOn = globalIdx < activeSegments
-                    
-                    // The 4 sub-segments are vertical slices
-                    val subTop = y + (3 - j) * (subH + subGap) // drawing from bottom to top within the block
-                    val rect = RectF(left, subTop, left + ledH, subTop + subH)
+                    val subRect = VfdHelper.calculateSubsegmentRect(
+                        isHorizontal = true,
+                        cellLeft = cellLeft,
+                        cellTop = y,
+                        cellWidth = ledH,
+                        cellHeight = colW,
+                        subIndex = j,
+                        subGap = subGap
+                    )
+                    val rect = RectF(subRect.left, subRect.top, subRect.right, subRect.bottom)
                     
                     val paint = if (isOn) paintGreen else (if (fxGhost) paintOffGreen else Paint().apply { color = Color.TRANSPARENT })
                     c.drawRoundRect(rect, r - 1f, r - 1f, paint)
@@ -939,18 +949,23 @@ class StereoVuView(context: Context) : FrameLayout(context) {
                         if (fxGlow) {
                             val glowRadius = 10f + level * 10f
                             paintGlow.set(paint)
-                            paintGlow.setShadowLayer(glowRadius, 0f, 0f, Color.parseColor("#00D4E8"))
+                            paintGlow.setShadowLayer(glowRadius, 0f, 0f, VfdHelper.COLOR_ACTIVE)
                             c.drawRoundRect(rect, r - 1f, r - 1f, paintGlow)
                         }
                         if (fxSheen) {
-                            val glareRect = RectF(left + 1f, subTop + 1f, left + ledH * 0.35f, subTop + subH - 1f)
+                            val glareRect = RectF(rect.left + 1f, rect.top + 1f, rect.left + rect.width() * 0.35f, rect.bottom - 1f)
                             c.drawRoundRect(glareRect, r - 1f, r - 1f, paintSheen)
                         }
                     }
                     
                     if (globalIdx == peakSegment && peakAlpha > 0f && peak > 0.05f) {
-                        val pPaint = getPeakPaint(false, false)
-                        pPaint.alpha = peakAlpha.toInt().coerceIn(0, 255)
+                        val peakColor = VfdHelper.getPeakColor(peakMode)
+                        val pPaint = Paint().apply {
+                            color = peakColor
+                            style = Paint.Style.STROKE
+                            strokeWidth = 2.5f
+                            alpha = peakAlpha.toInt().coerceIn(0, 255)
+                        }
                         c.drawRoundRect(rect, r, r, pPaint)
                     }
                 }
