@@ -22,7 +22,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y portaudio19-dev libasound2-dev libqt6gui6 libqt6core6 libqt6widgets6
+          sudo apt-get install -y portaudio19-dev libasound2-dev libqt6gui6 libqt6core6 libqt6widgets6 pulseaudio
 
       - name: Install Python dependencies
         run: |
@@ -31,6 +31,7 @@ jobs:
 
       - name: Run Linux Test Suite
         run: |
+          pulseaudio --start --exit-idle-time=-1 || true
           QT_QPA_PLATFORM=offscreen PYTHONPATH=linux python3 -m pytest -v linux/
 
       - name: Build binary with PyInstaller

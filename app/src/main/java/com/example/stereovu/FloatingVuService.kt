@@ -346,6 +346,10 @@ class FloatingVuService : Service() {
                         if (audioRecord === record) {
                             audioRecord = null
                         }
+                        if (captureThread === Thread.currentThread()) {
+                            captureThread = null
+                            isRunning.set(false)
+                        }
                     }
                 }
             }
