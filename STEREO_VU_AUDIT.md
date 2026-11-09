@@ -176,20 +176,14 @@ To assess level calculations accurately, it is essential to trace the distinct s
 - **Remediation Caution:** A dedicated user Gain slider already exists in both applications. Developers should **not** add another slider or blindly delete the fixed multiplier without first defining the intended default sensitivity behavior (e.g., standardizing whether 0 dB on the visual scale represents digital full-scale 0 dBFS or an analog-style alignment level such as $-10\text{ dBFS}$ / $-18\text{ dBFS}$), while ensuring existing user settings and expectations are preserved.
 
 ### Dynamic Range vs. Scale Markings
-The physical scale markings in `drawScale()`:
-- `0 dB`: index `ledCount - 1` ($1.00 \times \text{height}$)
-- `-3 dB`: index `ledCount * 0.91` ($0.91 \times \text{height}$)
-- `-6 dB`: index `ledCount * 0.85` ($0.85 \times \text{height}$)
-- `-10 dB`: index `ledCount * 0.65` ($0.65 \times \text{height}$)
-- `-20 dB`: index `ledCount * 0.35` ($0.35 \times \text{height}$)
+The physical scale markings in `drawScale()` / `draw_scale()`:
+- `0 dB`: index `ledCount - 1`
+- `-3 dB`: index `(ledCount * 0.91).toInt()`
+- `-6 dB`: index `(ledCount * 0.85).toInt()`
+- `-10 dB`: index `(ledCount * 0.65).toInt()`
+- `-20 dB`: index `(ledCount * 0.35).toInt()`
 
-However, according to the linear-in-dB transfer function $\text{level} = \frac{\text{dB} + 50}{50}$:
-- At $-3\text{ dB}$, $\text{level} = \frac{47}{50} = 0.94$ (mark is painted at $0.91$)
-- At $-6\text{ dB}$, $\text{level} = \frac{44}{50} = 0.88$ (mark is painted at $0.85$)
-- At $-10\text{ dB}$, $\text{level} = \frac{40}{50} = 0.80$ (mark is painted at $0.65$)
-- At $-20\text{ dB}$, $\text{level} = \frac{30}{50} = 0.60$ (mark is painted at $0.35$)
-
-The tick mark distribution reflects a compressed, non-linear progression reminiscent of vintage analog VU meters, whereas the internal code calculates a strictly linear-in-dB bar height.
+The tick mark distribution appears designed with a non-linear taper reminiscent of vintage analog VU meters, whereas the meter bar fill height is computed using a linear-in-dB formula ($\text{level} = \frac{\text{dB} + 50}{50}$). Because drawing geometries, coordinate directions, and segment spacing vary between horizontal and vertical orientations across platforms, exact visual alignment requires a systematic calibration check against the active transfer function rather than assuming identical mathematical alignment across all orientations.
 
 ---
 
@@ -366,16 +360,16 @@ In Custom mode, Android persists `decay` where $\text{decaySpeed} = 1.0 - \text{
 - **Impact:** Advertising formal compliance with ITU-R BS.1770 is technically inaccurate without documented validation.
 - **Remediation:** Update documentation to describe the feature as a "custom 4× oversampled inter-sample peak estimate" until formal equivalence or superior performance is demonstrated against BS.1770-5 Annex 2.
 
-### DSP-003: Discrepancy Between Scale Markings and Meter Transfer Function
+### DSP-003: Potential Misalignment Between Visual Scale Markings and Transfer Function
 - **Severity:** Medium
 - **Category:** Audio DSP / Visual Calibration
 - **Affected Files:**
-  - `app/src/main/java/com/example/stereovu/StereoVuView.kt` (`drawScale`)
-  - `linux/stereo_vu.py` (`draw_scale`)
+  - `app/src/main/java/com/example/stereovu/StereoVuView.kt` (`drawScale`, `drawScaleHorizontal`)
+  - `linux/stereo_vu.py` (`draw_scale_vertical`, `draw_scale_horizontal`)
 - **Observation:**
-  The meter uses a linear-in-dB formula $\text{level} = \frac{\text{dB} + 50}{50}$, but paints the $-10\text{ dB}$ tick mark at $65\%$ of bar height (which corresponds to $-17.5\text{ dB}$ in the formula) and $-20\text{ dB}$ at $35\%$ of height (corresponding to $-32.5\text{ dB}$).
-- **Impact:** Meter readings visually misrepresent signal levels by several decibels relative to the printed scale markings.
-- **Remediation:** Align tick mark locations with the formula ($\text{height} \times \frac{\text{dB} + 50}{50}$) or adopt a calibrated non-linear analog meter scale mapping.
+  The visual tick positions place scale labels at non-linear index fractions (e.g., $-10\text{ dB}$ at $0.65 \times \text{ledCount}$, $-20\text{ dB}$ at $0.35 \times \text{ledCount}$), whereas the internal bar fill height is driven by a linear-in-dB formula ($\frac{\text{dB} + 50}{50}$).
+- **Impact:** Visual tick marks and bar level positions may not consistently correspond across layouts and orientations, creating potential visual ambiguity.
+- **Remediation:** Conduct a consistent calibration check of tick coordinates and bar fill across both platforms and orientations, aligning physical marks with the active transfer function or explicitly defining a non-linear analog scale taper.
 
 ### LINUX-001: Memory Allocation Risks in Audio Callback Thread
 - **Severity:** Medium
@@ -477,7 +471,10 @@ graph TD
 - **Are Android and Linux behavior sufficiently consistent?**
   **Yes.** Visual geometry, color palettes, LCD customization, and ballistics modes are well synchronized, with only minor Custom mode preference key divergence.
 - **Are there release-blocking defects?**
-  **Yes.** `ANDROID-001` (service thread lifecycle and error handling) and `DSP-001` (display multiplier saturation above $-9.542\text{ dBFS}$) should be addressed to ensure release stability and measurement transparency.
+  **No categorical release blockers are proven, but there are high-priority risks requiring correction and targeted runtime validation.** Specifically:
+  - `ANDROID-001` is a high-priority defect identified via static code analysis (concurrency on startup, unhandled non-positive read returns, unjoined thread teardown); while potential runtime instability on specific HALs is a clear risk, native crashes or deadlocks have not been empirically reproduced in testing.
+  - `DSP-001` represents a significant visual measurement limitation due to the $3.0\times$ display multiplier compressing headroom above $-9.542\text{ dBFS}$, but reflects existing application behavior rather than an unintended regression.
+  Both issues should be corrected and verified under runtime testing prior to general release.
 - **What should be improved first?**
   Hardening the `FloatingVuService` audio capture lifecycle and defining calibrated sensitivity behavior for the decibel transfer function.
 - **Which areas should not be changed because they are already correct?**
