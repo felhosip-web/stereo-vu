@@ -27,7 +27,11 @@ jobs:
       - name: Install Python dependencies
         run: |
           pip install -r linux/requirements.txt
-          pip install pyinstaller
+          pip install pytest pyinstaller
+
+      - name: Run Linux Test Suite
+        run: |
+          QT_QPA_PLATFORM=offscreen PYTHONPATH=linux python3 -m pytest -v linux/
 
       - name: Build binary with PyInstaller
         run: |

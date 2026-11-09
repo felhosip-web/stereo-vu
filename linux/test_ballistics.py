@@ -1,7 +1,7 @@
 import unittest
 import math
 import numpy as np
-from true_peak import TruePeakDetector, get_migrated_mode, PHASE_1, PHASE_2, PHASE_3
+from true_peak import TruePeakDetector, get_migrated_mode, PHASE_1, PHASE_2, PHASE_3, TAPS
 
 class FakeSettings:
     """Mock for QSettings to test idempotent migration and preference retrieval."""
@@ -168,6 +168,56 @@ class TestBallisticsAndPeak(unittest.TestCase):
 
         self.assertAlmostEqual(discrete_peak_l, 0.65)
         self.assertAlmostEqual(discrete_peak_r, 0.65)
+
+    def test_numerical_equivalence_with_reference(self):
+        """
+        Verify that the optimized TruePeakDetector produces output strictly equivalent
+        to the unvectorized definition within floating-point tolerance (< 1e-12).
+        """
+        # Baseline reference detector logic
+        class ReferenceDetector:
+            def __init__(self):
+                self.delay_l = np.zeros(TAPS, dtype=np.float64)
+                self.delay_r = np.zeros(TAPS, dtype=np.float64)
+                self.head = 0
+
+            def process_buffer(self, samples_l: np.ndarray, samples_r: np.ndarray):
+                peak_l = float(np.max(np.abs(samples_l))) if len(samples_l) > 0 else 0.0
+                peak_r = float(np.max(np.abs(samples_r))) if len(samples_r) > 0 else 0.0
+                for i in range(len(samples_l)):
+                    s_l = float(samples_l[i])
+                    s_r = float(samples_r[i])
+                    self.delay_l[self.head] = s_l
+                    self.delay_r[self.head] = s_r
+                    idx = (self.head - np.arange(TAPS)) % TAPS
+                    hist_l = self.delay_l[idx]
+                    hist_r = self.delay_r[idx]
+                    p1_l = abs(np.dot(hist_l, PHASE_1))
+                    p2_l = abs(np.dot(hist_l, PHASE_2))
+                    p3_l = abs(np.dot(hist_l, PHASE_3))
+                    p1_r = abs(np.dot(hist_r, PHASE_1))
+                    p2_r = abs(np.dot(hist_r, PHASE_2))
+                    p3_r = abs(np.dot(hist_r, PHASE_3))
+                    max_l = max(abs(s_l), p1_l, p2_l, p3_l)
+                    max_r = max(abs(s_r), p1_r, p2_r, p3_r)
+                    self.head = (self.head + 1) % TAPS
+                    if max_l > peak_l: peak_l = max_l
+                    if max_r > peak_r: peak_r = max_r
+                return peak_l, peak_r
+
+        ref = ReferenceDetector()
+        opt = TruePeakDetector()
+
+        np.random.seed(42)
+        # Test varying chunk sizes across 10 buffers
+        for chunk_size in [1, 5, 11, 12, 13, 64, 256, 1024]:
+            buf_l = np.random.uniform(-1.0, 1.0, chunk_size)
+            buf_r = np.random.uniform(-1.0, 1.0, chunk_size)
+            ref_l, ref_r = ref.process_buffer(buf_l, buf_r)
+            opt_l, opt_r = opt.process_buffer(buf_l, buf_r)
+
+            self.assertAlmostEqual(ref_l, opt_l, delta=1e-12, msg=f"Mismatch on chunk size {chunk_size} L")
+            self.assertAlmostEqual(ref_r, opt_r, delta=1e-12, msg=f"Mismatch on chunk size {chunk_size} R")
 
     def test_mode_migration_backward_compatibility(self):
         """
