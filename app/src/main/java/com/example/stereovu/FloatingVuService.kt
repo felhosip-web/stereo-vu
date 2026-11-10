@@ -28,7 +28,6 @@ class FloatingVuService : Service() {
     private var windowManager: WindowManager? = null
     private var vuView: StereoVuView? = null
     private val captureLock = Any()
-    private var activeProjection: android.media.projection.MediaProjection? = null
     private var captureSession: AudioCaptureSession? = null
     @Volatile private var amplitudeCount = 32767.0
     @Volatile private var detectionMode = 0 // 0 = Peak, 1 = RMS
@@ -128,29 +127,26 @@ class FloatingVuService : Service() {
         windowManager?.addView(vuView, params)
     }
 
-    private fun cleanupActiveProjection() {
-        try {
-            activeProjection?.stop()
-        } catch (t: Throwable) {
-            Log.w(TAG, "Error stopping MediaProjection", t)
-        }
-        activeProjection = null
-    }
+    private data class PlatformAudioCaptureResources(
+        val record: AudioRecord,
+        val sampleRate: Int,
+        val projection: android.media.projection.MediaProjection?
+    )
 
-    private fun createPlatformAudioRecord(captureIntent: Intent?): Pair<AudioRecord, Int>? {
+    private fun createPlatformAudioRecord(captureIntent: Intent?): PlatformAudioCaptureResources? {
         val sampleRate = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && captureIntent != null) 48000 else 44100
-        cleanupActiveProjection()
+        var projection: android.media.projection.MediaProjection? = null
 
         return try {
             val record = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && captureIntent != null) {
                 val mgr = getSystemService(MediaProjectionManager::class.java)
-                val projection = mgr?.getMediaProjection(-1, captureIntent)
-                if (projection == null) {
+                val proj = mgr?.getMediaProjection(-1, captureIntent)
+                if (proj == null) {
                     Log.e(TAG, "MediaProjection not available")
                     return null
                 }
-                activeProjection = projection
-                val config = AudioPlaybackCaptureConfiguration.Builder(projection)
+                projection = proj
+                val config = AudioPlaybackCaptureConfiguration.Builder(proj)
                     .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
                     .addMatchingUsage(AudioAttributes.USAGE_GAME)
                     .build()
@@ -176,10 +172,14 @@ class FloatingVuService : Service() {
                     .setBufferSizeInBytes(8192)
                     .build()
             }
-            Pair(record, sampleRate)
+            PlatformAudioCaptureResources(record, sampleRate, projection)
         } catch (e: Exception) {
             Log.e(TAG, "Error constructing AudioRecord", e)
-            cleanupActiveProjection()
+            try {
+                projection?.stop()
+            } catch (t: Throwable) {
+                Log.w(TAG, "Error stopping MediaProjection after creation failure", t)
+            }
             null
         }
     }
@@ -190,18 +190,25 @@ class FloatingVuService : Service() {
                 return
             }
 
-            val pair = createPlatformAudioRecord(captureIntent) ?: return
-            val platformRecord = pair.first
-            val sampleRate = pair.second
+            val resources = createPlatformAudioRecord(captureIntent) ?: return
+            val platformRecord = resources.record
+            val sampleRate = resources.sampleRate
+            val sessionProjection = resources.projection
 
             if (platformRecord.state != AudioRecord.STATE_INITIALIZED) {
                 Log.e(TAG, "AudioRecord failed to initialize (state != STATE_INITIALIZED)")
                 platformRecord.release()
-                cleanupActiveProjection()
+                try {
+                    sessionProjection?.stop()
+                } catch (t: Throwable) {
+                    Log.w(TAG, "Error stopping MediaProjection", t)
+                }
                 return
             }
 
             val recordAdapter = object : IAudioRecord {
+                private var isReleased = false
+
                 override val state: Int get() = platformRecord.state
                 override val recordingState: Int get() = platformRecord.recordingState
                 override fun startRecording() = platformRecord.startRecording()
@@ -209,10 +216,16 @@ class FloatingVuService : Service() {
                     platformRecord.read(audioData, offsetInShorts, sizeInShorts)
                 override fun stop() = platformRecord.stop()
                 override fun release() {
+                    if (isReleased) return
+                    isReleased = true
                     try {
                         platformRecord.release()
                     } finally {
-                        cleanupActiveProjection()
+                        try {
+                            sessionProjection?.stop()
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Error stopping session MediaProjection", t)
+                        }
                     }
                 }
             }
@@ -224,7 +237,7 @@ class FloatingVuService : Service() {
                     Log.e(TAG, "Audio capture error: ${t.message}", t)
                 },
                 onUnexpectedTermination = {
-                    Log.w(TAG, "Audio capture worker terminated unexpectedly; clearing levels")
+                    Log.w(TAG, "Audio capture worker terminated unexpectedly; clearing levels and stopping service")
                     vuView?.post {
                         vuView?.updateLevels(0f, 0f)
                     }
@@ -232,6 +245,10 @@ class FloatingVuService : Service() {
                         if (captureSession === session) {
                             captureSession = null
                         }
+                    }
+                    // Stop service on main thread so foreground service does not run indefinitely with dead capture worker
+                    android.os.Handler(android.os.Looper.getMainLooper()).post {
+                        stopSelf()
                     }
                 }
             ) { record, isRunningPredicate ->
@@ -393,11 +410,8 @@ class FloatingVuService : Service() {
         }
 
         // Bounded wait for worker thread termination outside lock
-        // If join times out, AudioCaptureSession guarantees the recorder is NOT prematurely released
+        // If join times out, AudioCaptureSession guarantees the recorder and projection are NOT prematurely released
         sessionToStop?.stopAndAwait(WORKER_JOIN_TIMEOUT_MS)
-        synchronized(captureLock) {
-            cleanupActiveProjection()
-        }
 
         vuView?.let { windowManager?.removeView(it) }
         vuView = null

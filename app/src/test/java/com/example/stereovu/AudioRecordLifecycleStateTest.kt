@@ -9,7 +9,8 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Unit tests verifying lifecycle state transitions, thread synchronization,
- * bounded termination, stop/release serialization, and exception handling for AudioCaptureSession.
+ * bounded termination, stop/release serialization, MediaProjection ownership,
+ * and exception handling for AudioCaptureSession.
  */
 class AudioRecordLifecycleStateTest {
 
@@ -17,7 +18,8 @@ class AudioRecordLifecycleStateTest {
         val blockInReadLatch: CountDownLatch? = null,
         val unblockReadLatch: CountDownLatch? = null,
         val blockInStopLatch: CountDownLatch? = null,
-        val unblockStopLatch: CountDownLatch? = null
+        val unblockStopLatch: CountDownLatch? = null,
+        val onReleaseCallback: (() -> Unit)? = null
     ) : IAudioRecord {
         val startRecordingCallCount = AtomicInteger(0)
         val stopCallCount = AtomicInteger(0)
@@ -73,6 +75,7 @@ class AudioRecordLifecycleStateTest {
                 releasedWhileStopping.set(true)
             }
             state = 0 // STATE_UNINITIALIZED
+            onReleaseCallback?.invoke()
         }
     }
 
@@ -236,6 +239,45 @@ class AudioRecordLifecycleStateTest {
         assertTrue(session.stopAndAwait(1000))
         assertFalse("Intentional shutdown must NOT trigger onUnexpectedTermination", unexpectedExitSignaled.get())
         assertEquals(1, mockRecord.releaseCallCount.get())
+    }
+
+    @Test
+    fun testPerSessionResourceOwnershipDoesNotAffectNewerSession() {
+        // Simulates two consecutive sessions, ensuring old session cleanup cannot stop newer session resources
+        val oldResourceStopCount = AtomicInteger(0)
+        val newResourceStopCount = AtomicInteger(0)
+
+        val oldRecord = MockAudioRecord(onReleaseCallback = {
+            oldResourceStopCount.incrementAndGet()
+        })
+        val newRecord = MockAudioRecord(onReleaseCallback = {
+            newResourceStopCount.incrementAndGet()
+        })
+
+        val oldSession = AudioCaptureSession(oldRecord) { _, isRunning ->
+            while (isRunning()) {
+                Thread.sleep(10)
+            }
+        }
+        val newSession = AudioCaptureSession(newRecord) { _, isRunning ->
+            while (isRunning()) {
+                Thread.sleep(10)
+            }
+        }
+
+        oldSession.start("OldSession")
+        oldSession.stopAndAwait(500)
+        assertEquals(1, oldResourceStopCount.get())
+        assertEquals(0, newResourceStopCount.get())
+
+        newSession.start("NewSession")
+        // Triggering any stale cleanup on old session must not touch new session's resources
+        oldSession.stopAndAwait(500)
+        assertEquals(1, oldResourceStopCount.get())
+        assertEquals(0, newResourceStopCount.get())
+
+        newSession.stopAndAwait(500)
+        assertEquals(1, newResourceStopCount.get())
     }
 
     @Test

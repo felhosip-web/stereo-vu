@@ -15,7 +15,7 @@ if app is None:
 # Provide mock for sounddevice if PortAudio / sounddevice fails in headless test environment
 try:
     import sounddevice
-except Exception:
+except (ImportError, OSError):
     from unittest.mock import MagicMock
     mock_sd = MagicMock()
     mock_sd.query_devices.return_value = [{'name': 'Mock Audio Input', 'max_input_channels': 2, 'hostapi': 0}]

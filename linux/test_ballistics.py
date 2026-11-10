@@ -201,8 +201,10 @@ class TestBallisticsAndPeak(unittest.TestCase):
                     max_l = max(abs(s_l), p1_l, p2_l, p3_l)
                     max_r = max(abs(s_r), p1_r, p2_r, p3_r)
                     self.head = (self.head + 1) % TAPS
-                    if max_l > peak_l: peak_l = max_l
-                    if max_r > peak_r: peak_r = max_r
+                    if max_l > peak_l:
+                        peak_l = max_l
+                    if max_r > peak_r:
+                        peak_r = max_r
                 return peak_l, peak_r
 
         ref = ReferenceDetector()
