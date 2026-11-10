@@ -9,20 +9,24 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * Unit tests verifying lifecycle state transitions, thread synchronization,
- * bounded termination, and single release ownership for AudioRecord.
+ * bounded termination, stop/release serialization, and exception handling for AudioCaptureSession.
  */
 class AudioRecordLifecycleStateTest {
 
     private class MockAudioRecord(
         val blockInReadLatch: CountDownLatch? = null,
-        val unblockReadLatch: CountDownLatch? = null
+        val unblockReadLatch: CountDownLatch? = null,
+        val blockInStopLatch: CountDownLatch? = null,
+        val unblockStopLatch: CountDownLatch? = null
     ) : IAudioRecord {
         val startRecordingCallCount = AtomicInteger(0)
         val stopCallCount = AtomicInteger(0)
         val releaseCallCount = AtomicInteger(0)
         val readCallCount = AtomicInteger(0)
         val isReading = AtomicBoolean(false)
+        val isStopping = AtomicBoolean(false)
         val releasedWhileReading = AtomicBoolean(false)
+        val releasedWhileStopping = AtomicBoolean(false)
 
         override var state: Int = 1 // STATE_INITIALIZED
         override var recordingState: Int = 1 // RECORDSTATE_STOPPED
@@ -48,16 +52,25 @@ class AudioRecordLifecycleStateTest {
         }
 
         override fun stop() {
-            stopCallCount.incrementAndGet()
-            recordingState = 1 // RECORDSTATE_STOPPED
-            // If reader is blocked waiting on unblockReadLatch, simulate unblocking on stop
-            unblockReadLatch?.countDown()
+            isStopping.set(true)
+            try {
+                stopCallCount.incrementAndGet()
+                blockInStopLatch?.countDown()
+                unblockStopLatch?.await(2, TimeUnit.SECONDS)
+                recordingState = 1 // RECORDSTATE_STOPPED
+                unblockReadLatch?.countDown()
+            } finally {
+                isStopping.set(false)
+            }
         }
 
         override fun release() {
             releaseCallCount.incrementAndGet()
             if (isReading.get()) {
                 releasedWhileReading.set(true)
+            }
+            if (isStopping.get()) {
+                releasedWhileStopping.set(true)
             }
             state = 0 // STATE_UNINITIALIZED
         }
@@ -133,6 +146,99 @@ class AudioRecordLifecycleStateTest {
     }
 
     @Test
+    fun testStopAndReleaseAreSerializedAndNeverConcurrent() {
+        val blockInStopLatch = CountDownLatch(1)
+        val unblockStopLatch = CountDownLatch(1)
+        val mockRecord = MockAudioRecord(
+            blockInStopLatch = blockInStopLatch,
+            unblockStopLatch = unblockStopLatch
+        )
+
+        val session = AudioCaptureSession(mockRecord) { _, isRunning ->
+            while (isRunning()) {
+                Thread.sleep(5)
+            }
+        }
+
+        session.start("TestWorkerStopSerial")
+        Thread.sleep(20)
+
+        // Asynchronously invoke stopAndAwait on thread A; it will enter stop() and block on unblockStopLatch
+        val stopThread = Thread {
+            session.stopAndAwait(1000)
+        }
+        stopThread.start()
+
+        // Wait until thread A is actively inside stop()
+        assertTrue(blockInStopLatch.await(1, TimeUnit.SECONDS))
+        assertTrue("record.stop() must be actively executing", mockRecord.isStopping.get())
+
+        // At this moment, release must NOT have executed
+        assertEquals("release must not execute concurrently with stop", 0, mockRecord.releaseCallCount.get())
+
+        // Unblock stop()
+        unblockStopLatch.countDown()
+        stopThread.join(1000)
+
+        // Now stop has completed and worker has exited
+        assertEquals(1, mockRecord.releaseCallCount.get())
+        assertFalse("release must never execute while stop() was active", mockRecord.releasedWhileStopping.get())
+    }
+
+    @Test
+    fun testWorkerExceptionIsCaughtReportedAndCleansUp() {
+        val mockRecord = MockAudioRecord()
+        val reportedError = AtomicBoolean(false)
+        val unexpectedExitSignaled = AtomicBoolean(false)
+        val latch = CountDownLatch(1)
+
+        val session = AudioCaptureSession(
+            record = mockRecord,
+            onError = {
+                reportedError.set(true)
+            },
+            onUnexpectedTermination = {
+                unexpectedExitSignaled.set(true)
+                latch.countDown()
+            }
+        ) { _, _ ->
+            throw IllegalStateException("Simulated hardware failure in capture loop")
+        }
+
+        session.start("TestWorkerException")
+        assertTrue(latch.await(1, TimeUnit.SECONDS))
+
+        assertTrue("Exception must be reported to onError callback", reportedError.get())
+        assertTrue("Unexpected termination callback must be triggered", unexpectedExitSignaled.get())
+        assertEquals("Release must run exactly once even on unhandled worker exception", 1, mockRecord.releaseCallCount.get())
+        assertFalse("Session must no longer be active", session.isActive)
+    }
+
+    @Test
+    fun testIntentionalShutdownDoesNotTriggerUnexpectedTermination() {
+        val mockRecord = MockAudioRecord()
+        val unexpectedExitSignaled = AtomicBoolean(false)
+
+        val session = AudioCaptureSession(
+            record = mockRecord,
+            onUnexpectedTermination = {
+                unexpectedExitSignaled.set(true)
+            }
+        ) { _, isRunning ->
+            while (isRunning()) {
+                Thread.sleep(5)
+            }
+        }
+
+        session.start("TestWorkerIntentional")
+        Thread.sleep(20)
+
+        assertTrue(session.stopAndAwait(1000))
+        assertFalse("Intentional shutdown must NOT trigger onUnexpectedTermination", unexpectedExitSignaled.get())
+        assertEquals(1, mockRecord.releaseCallCount.get())
+    }
+
+    @Test
     fun testJoinTimeoutDoesNotCausePrematureRelease() {
         val enterReadLatch = CountDownLatch(1)
         val releaseWorkerLatch = CountDownLatch(1)
@@ -140,12 +246,11 @@ class AudioRecordLifecycleStateTest {
 
         val session = AudioCaptureSession(mockRecord) { _, _ ->
             enterReadLatch.countDown()
-            // Ignore interruption to simulate an uninterruptible blocking operation in HAL driver
             while (releaseWorkerLatch.count > 0) {
                 try {
                     releaseWorkerLatch.await(1, TimeUnit.SECONDS)
                 } catch (ie: InterruptedException) {
-                    // Suppress interruption so thread remains alive past timeout
+                    // Suppress interruption
                 }
             }
         }
@@ -153,18 +258,13 @@ class AudioRecordLifecycleStateTest {
         session.start("TestWorkerTimeout")
         assertTrue(enterReadLatch.await(1, TimeUnit.SECONDS))
 
-        // stopAndAwait with a short timeout (50ms) to force a join timeout
         val joinedInTime = session.stopAndAwait(50)
         assertFalse("Join should have timed out", joinedInTime)
-
-        // Bounded join timed out, but worker is still alive; recorder MUST NOT be released prematurely!
         assertEquals("Recorder must NOT be released while worker thread is still alive", 0, mockRecord.releaseCallCount.get())
 
-        // Now allow worker to exit
         releaseWorkerLatch.countDown()
         Thread.sleep(200)
 
-        // Once worker finishes its loop and enters finally, release must be executed exactly once
         assertEquals("Recorder must be released once worker completes", 1, mockRecord.releaseCallCount.get())
     }
 
@@ -188,16 +288,13 @@ class AudioRecordLifecycleStateTest {
         session.start("TestWorkerCleanup")
         assertTrue(enterReadLatch.await(1, TimeUnit.SECONDS))
 
-        // Timeout join
         val joined = session.stopAndAwait(50)
         assertFalse(joined)
         assertEquals(0, mockRecord.releaseCallCount.get())
 
-        // Allow worker to finish
         releaseWorkerLatch.countDown()
         Thread.sleep(200)
 
-        // Repeated stop calls after worker has terminated
         session.stopAndAwait(100)
         session.stopAndAwait(100)
 

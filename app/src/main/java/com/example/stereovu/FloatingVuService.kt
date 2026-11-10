@@ -28,6 +28,7 @@ class FloatingVuService : Service() {
     private var windowManager: WindowManager? = null
     private var vuView: StereoVuView? = null
     private val captureLock = Any()
+    private var activeProjection: android.media.projection.MediaProjection? = null
     private var captureSession: AudioCaptureSession? = null
     @Volatile private var amplitudeCount = 32767.0
     @Volatile private var detectionMode = 0 // 0 = Peak, 1 = RMS
@@ -127,8 +128,19 @@ class FloatingVuService : Service() {
         windowManager?.addView(vuView, params)
     }
 
+    private fun cleanupActiveProjection() {
+        try {
+            activeProjection?.stop()
+        } catch (t: Throwable) {
+            Log.w(TAG, "Error stopping MediaProjection", t)
+        }
+        activeProjection = null
+    }
+
     private fun createPlatformAudioRecord(captureIntent: Intent?): Pair<AudioRecord, Int>? {
         val sampleRate = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && captureIntent != null) 48000 else 44100
+        cleanupActiveProjection()
+
         return try {
             val record = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && captureIntent != null) {
                 val mgr = getSystemService(MediaProjectionManager::class.java)
@@ -137,6 +149,7 @@ class FloatingVuService : Service() {
                     Log.e(TAG, "MediaProjection not available")
                     return null
                 }
+                activeProjection = projection
                 val config = AudioPlaybackCaptureConfiguration.Builder(projection)
                     .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
                     .addMatchingUsage(AudioAttributes.USAGE_GAME)
@@ -166,6 +179,7 @@ class FloatingVuService : Service() {
             Pair(record, sampleRate)
         } catch (e: Exception) {
             Log.e(TAG, "Error constructing AudioRecord", e)
+            cleanupActiveProjection()
             null
         }
     }
@@ -183,6 +197,7 @@ class FloatingVuService : Service() {
             if (platformRecord.state != AudioRecord.STATE_INITIALIZED) {
                 Log.e(TAG, "AudioRecord failed to initialize (state != STATE_INITIALIZED)")
                 platformRecord.release()
+                cleanupActiveProjection()
                 return
             }
 
@@ -193,10 +208,33 @@ class FloatingVuService : Service() {
                 override fun read(audioData: ShortArray, offsetInShorts: Int, sizeInShorts: Int): Int =
                     platformRecord.read(audioData, offsetInShorts, sizeInShorts)
                 override fun stop() = platformRecord.stop()
-                override fun release() = platformRecord.release()
+                override fun release() {
+                    try {
+                        platformRecord.release()
+                    } finally {
+                        cleanupActiveProjection()
+                    }
+                }
             }
 
-            val session = AudioCaptureSession(recordAdapter) { record, isRunningPredicate ->
+            var session: AudioCaptureSession? = null
+            session = AudioCaptureSession(
+                record = recordAdapter,
+                onError = { t ->
+                    Log.e(TAG, "Audio capture error: ${t.message}", t)
+                },
+                onUnexpectedTermination = {
+                    Log.w(TAG, "Audio capture worker terminated unexpectedly; clearing levels")
+                    vuView?.post {
+                        vuView?.updateLevels(0f, 0f)
+                    }
+                    synchronized(captureLock) {
+                        if (captureSession === session) {
+                            captureSession = null
+                        }
+                    }
+                }
+            ) { record, isRunningPredicate ->
                 val buffer = ShortArray(1024)
 
                 // Pre-allocate circular sample-squared buffer for up to 1000 ms (sampleRate frames)
@@ -357,6 +395,9 @@ class FloatingVuService : Service() {
         // Bounded wait for worker thread termination outside lock
         // If join times out, AudioCaptureSession guarantees the recorder is NOT prematurely released
         sessionToStop?.stopAndAwait(WORKER_JOIN_TIMEOUT_MS)
+        synchronized(captureLock) {
+            cleanupActiveProjection()
+        }
 
         vuView?.let { windowManager?.removeView(it) }
         vuView = null
