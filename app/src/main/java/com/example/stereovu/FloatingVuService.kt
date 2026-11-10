@@ -197,11 +197,16 @@ class FloatingVuService : Service() {
 
             if (platformRecord.state != AudioRecord.STATE_INITIALIZED) {
                 Log.e(TAG, "AudioRecord failed to initialize (state != STATE_INITIALIZED)")
-                platformRecord.release()
                 try {
-                    sessionProjection?.stop()
+                    platformRecord.release()
                 } catch (t: Throwable) {
-                    Log.w(TAG, "Error stopping MediaProjection", t)
+                    Log.w(TAG, "Error releasing uninitialized AudioRecord", t)
+                } finally {
+                    try {
+                        sessionProjection?.stop()
+                    } catch (t: Throwable) {
+                        Log.w(TAG, "Error stopping session MediaProjection after initialization failure", t)
+                    }
                 }
                 return
             }

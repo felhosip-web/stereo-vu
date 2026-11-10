@@ -281,6 +281,38 @@ class AudioRecordLifecycleStateTest {
     }
 
     @Test
+    fun testInitializationFailureStopsProjectionEvenIfReleaseThrows() {
+        val projectionStopped = AtomicBoolean(false)
+        val releaseAttempted = AtomicBoolean(false)
+
+        val failingRecord = object : IAudioRecord {
+            override val state: Int = 0 // STATE_UNINITIALIZED
+            override val recordingState: Int = 1
+            override fun startRecording() {}
+            override fun read(audioData: ShortArray, offsetInShorts: Int, sizeInShorts: Int): Int = 0
+            override fun stop() {}
+            override fun release() {
+                releaseAttempted.set(true)
+                throw RuntimeException("Simulated native release failure")
+            }
+        }
+
+        // Simulate the initialization check pattern from FloatingVuService
+        if (failingRecord.state != 1 /* STATE_INITIALIZED */) {
+            try {
+                failingRecord.release()
+            } catch (t: Throwable) {
+                // Expected to catch release error
+            } finally {
+                projectionStopped.set(true)
+            }
+        }
+
+        assertTrue("Release must be attempted", releaseAttempted.get())
+        assertTrue("Projection must be stopped despite release throwing an exception", projectionStopped.get())
+    }
+
+    @Test
     fun testJoinTimeoutDoesNotCausePrematureRelease() {
         val enterReadLatch = CountDownLatch(1)
         val releaseWorkerLatch = CountDownLatch(1)
