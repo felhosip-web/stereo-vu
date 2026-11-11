@@ -22,6 +22,16 @@ except (ImportError, OSError):
     mock_sd.default.device = [0]
     mock_sd.query_hostapis.return_value = [{'name': 'MockAPI'}]
     sys.modules['sounddevice'] = mock_sd
+except Exception as e:
+    if "PortAudio" in type(e).__name__:
+        from unittest.mock import MagicMock
+        mock_sd = MagicMock()
+        mock_sd.query_devices.return_value = [{'name': 'Mock Audio Input', 'max_input_channels': 2, 'hostapi': 0}]
+        mock_sd.default.device = [0]
+        mock_sd.query_hostapis.return_value = [{'name': 'MockAPI'}]
+        sys.modules['sounddevice'] = mock_sd
+    else:
+        raise
 
 import stereo_vu
 
