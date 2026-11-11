@@ -27,13 +27,18 @@ class FloatingVuService : Service() {
 
     private var windowManager: WindowManager? = null
     private var vuView: StereoVuView? = null
-    private val captureLock = Any()
-    private var captureSession: AudioCaptureSession? = null
+    private val mainHandler by lazy { android.os.Handler(android.os.Looper.getMainLooper()) }
     @Volatile private var amplitudeCount = 32767.0
     @Volatile private var detectionMode = 0 // 0 = Peak, 1 = RMS
     @Volatile private var ballisticsMode = 0 // 0..7 (3 = True Peak)
     @Volatile private var rmsWindowMs = 350 // Default 350 ms (50 - 1000 ms)
     private val truePeakDetector = TruePeakDetector()
+
+    internal val coordinator = CaptureSessionCoordinator(
+        mainThreadPoster = { runnable -> mainHandler.post(runnable) },
+        resetLevelsAction = { vuView?.updateLevels(0f, 0f) },
+        stopServiceAction = { stopSelf() }
+    )
 
     private val prefListener = SharedPreferences.OnSharedPreferenceChangeListener { prefs, key ->
         when (key) {
@@ -185,8 +190,8 @@ class FloatingVuService : Service() {
     }
 
     private fun startAudioCapture(captureIntent: Intent?) {
-        synchronized(captureLock) {
-            if (captureSession?.isActive == true) {
+        synchronized(coordinator.lock) {
+            if (coordinator.currentSession?.isActive == true) {
                 return
             }
 
@@ -235,6 +240,7 @@ class FloatingVuService : Service() {
                 }
             }
 
+            var sessionGeneration = 0L
             var session: AudioCaptureSession? = null
             session = AudioCaptureSession(
                 record = recordAdapter,
@@ -242,25 +248,8 @@ class FloatingVuService : Service() {
                     Log.e(TAG, "Audio capture error: ${t.message}", t)
                 },
                 onUnexpectedTermination = {
-                    val isCurrent = synchronized(captureLock) {
-                        if (captureSession === session) {
-                            captureSession = null
-                            true
-                        } else {
-                            false
-                        }
-                    }
-                    if (isCurrent) {
-                        Log.w(TAG, "Active audio capture worker terminated unexpectedly; clearing levels and stopping service")
-                        vuView?.post {
-                            vuView?.updateLevels(0f, 0f)
-                        }
-                        // Stop service on main thread so foreground service does not run indefinitely with dead capture worker
-                        android.os.Handler(android.os.Looper.getMainLooper()).post {
-                            stopSelf()
-                        }
-                    } else {
-                        Log.i(TAG, "Ignoring unexpected termination callback from obsolete/replaced capture session")
+                    session?.let { s ->
+                        coordinator.onSessionUnexpectedTermination(s, sessionGeneration)
                     }
                 }
             ) { record, isRunningPredicate ->
@@ -406,7 +395,7 @@ class FloatingVuService : Service() {
                 }
             }
 
-            captureSession = session
+            sessionGeneration = coordinator.attachSession(session)
             session.start("StereoVuAudioCapture")
         }
     }
@@ -415,11 +404,7 @@ class FloatingVuService : Service() {
         val prefs = getSharedPreferences("StereoVuPrefs", Context.MODE_PRIVATE)
         prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
 
-        val sessionToStop: AudioCaptureSession?
-        synchronized(captureLock) {
-            sessionToStop = captureSession
-            captureSession = null
-        }
+        val sessionToStop = coordinator.detachForShutdown()
 
         // Bounded wait for worker thread termination outside lock
         // If join times out, AudioCaptureSession guarantees the recorder and projection are NOT prematurely released

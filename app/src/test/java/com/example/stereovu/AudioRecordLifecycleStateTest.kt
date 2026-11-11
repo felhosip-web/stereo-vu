@@ -302,51 +302,82 @@ class AudioRecordLifecycleStateTest {
     }
 
     @Test
-    fun testStaleSessionCallbackDoesNotStopNewerSession() {
-        // Simulates the identity check pattern in FloatingVuService.onUnexpectedTermination
-        val captureLock = Any()
-        var currentSession: AudioCaptureSession? = null
+    fun testProductionCoordinatorObsoleteSessionCannotStopNewerSession() {
+        // Directly tests production CaptureSessionCoordinator logic
         val serviceStopped = AtomicBoolean(false)
         val levelsReset = AtomicBoolean(false)
+        val queuedRunnables = mutableListOf<Runnable>()
+
+        val coordinator = CaptureSessionCoordinator(
+            mainThreadPoster = { runnable -> queuedRunnables.add(runnable) },
+            resetLevelsAction = { levelsReset.set(true) },
+            stopServiceAction = { serviceStopped.set(true) }
+        )
 
         val record1 = MockAudioRecord()
         val record2 = MockAudioRecord()
-
         val session1 = AudioCaptureSession(record1) { _, _ -> }
         val session2 = AudioCaptureSession(record2) { _, _ -> }
 
-        synchronized(captureLock) {
-            currentSession = session2
-        }
+        val gen1 = coordinator.attachSession(session1)
+        val gen2 = coordinator.attachSession(session2)
+        assertTrue(gen2 > gen1)
+        assertSame(session2, coordinator.currentSession)
 
-        // Simulate session1 (an older/replaced session) firing its unexpected termination callback
-        fun onSessionTerminated(session: AudioCaptureSession) {
-            val isCurrent = synchronized(captureLock) {
-                if (currentSession === session) {
-                    currentSession = null
-                    true
-                } else {
-                    false
-                }
-            }
-            if (isCurrent) {
-                levelsReset.set(true)
-                serviceStopped.set(true)
-            }
-        }
+        // Older session 1 terminates unexpectedly
+        coordinator.onSessionUnexpectedTermination(session1, gen1)
 
-        onSessionTerminated(session1)
+        // Obsolete session must NOT post to main thread
+        assertTrue("No main thread runnable should be queued for obsolete session", queuedRunnables.isEmpty())
+        assertFalse("Service must not be stopped", serviceStopped.get())
+        assertFalse("Levels must not be reset", levelsReset.get())
+        assertSame("Current session must remain session 2", session2, coordinator.currentSession)
 
-        // Because session1 !== session2, active session2 must be preserved and no shutdown triggered
-        assertFalse("Service must NOT be stopped by obsolete session", serviceStopped.get())
-        assertFalse("Levels must NOT be reset by obsolete session", levelsReset.get())
-        assertSame("Active session must remain untouched", session2, currentSession)
+        // Active session 2 terminates unexpectedly
+        coordinator.onSessionUnexpectedTermination(session2, gen2)
+        assertEquals("Main thread runnable must be queued for active session", 1, queuedRunnables.size)
 
-        // When the current active session2 terminates, it must properly trigger
-        onSessionTerminated(session2)
-        assertTrue("Service must be stopped by current session", serviceStopped.get())
-        assertTrue("Levels must be reset by current session", levelsReset.get())
-        assertNull("Current session reference must be cleared", currentSession)
+        // Execute queued main thread runnable
+        queuedRunnables.removeAt(0).run()
+        assertTrue("Levels must be reset for active session", levelsReset.get())
+        assertTrue("Service must be stopped for active session", serviceStopped.get())
+        assertNull("Current session must be cleared", coordinator.currentSession)
+    }
+
+    @Test
+    fun testProductionCoordinatorQueuedCallbackBecomesStaleIfNewSessionStarts() {
+        val serviceStopped = AtomicBoolean(false)
+        val levelsReset = AtomicBoolean(false)
+        val queuedRunnables = mutableListOf<Runnable>()
+
+        val coordinator = CaptureSessionCoordinator(
+            mainThreadPoster = { runnable -> queuedRunnables.add(runnable) },
+            resetLevelsAction = { levelsReset.set(true) },
+            stopServiceAction = { serviceStopped.set(true) }
+        )
+
+        val record1 = MockAudioRecord()
+        val record2 = MockAudioRecord()
+        val session1 = AudioCaptureSession(record1) { _, _ -> }
+        val session2 = AudioCaptureSession(record2) { _, _ -> }
+
+        val gen1 = coordinator.attachSession(session1)
+
+        // Session 1 terminates unexpectedly, queueing a runnable on the main thread
+        coordinator.onSessionUnexpectedTermination(session1, gen1)
+        assertEquals(1, queuedRunnables.size)
+
+        // BEFORE the queued runnable executes on the main thread, a NEW capture session starts!
+        val gen2 = coordinator.attachSession(session2)
+        assertTrue(gen2 > gen1)
+
+        // Now the previously queued runnable executes on the main thread
+        queuedRunnables.removeAt(0).run()
+
+        // Because session 2 started, the queued runnable for session 1 must be rejected during revalidation!
+        assertFalse("Service must NOT be stopped because newer session 2 started", serviceStopped.get())
+        assertFalse("Levels must NOT be reset because newer session 2 started", levelsReset.get())
+        assertSame("Active session 2 must be preserved", session2, coordinator.currentSession)
     }
 
     @Test
