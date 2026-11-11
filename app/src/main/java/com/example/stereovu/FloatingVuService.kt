@@ -23,6 +23,31 @@ class FloatingVuService : Service() {
     companion object {
         private const val TAG = "FloatingVuService"
         private const val WORKER_JOIN_TIMEOUT_MS = 1000L
+
+        internal fun cleanupUninitializedRecord(
+            releaseRecord: () -> Unit,
+            stopProjection: () -> Unit
+        ) {
+            try {
+                releaseRecord()
+            } catch (t: Throwable) {
+                try {
+                    Log.w(TAG, "Error releasing uninitialized AudioRecord", t)
+                } catch (logErr: Throwable) {
+                    System.err.println("[$TAG] WARN: Error releasing uninitialized AudioRecord ${t.message}")
+                }
+            } finally {
+                try {
+                    stopProjection()
+                } catch (t: Throwable) {
+                    try {
+                        Log.w(TAG, "Error stopping session MediaProjection after initialization failure", t)
+                    } catch (logErr: Throwable) {
+                        System.err.println("[$TAG] WARN: Error stopping session MediaProjection after initialization failure ${t.message}")
+                    }
+                }
+            }
+        }
     }
 
     private var windowManager: WindowManager? = null
@@ -202,17 +227,10 @@ class FloatingVuService : Service() {
 
             if (platformRecord.state != AudioRecord.STATE_INITIALIZED) {
                 Log.e(TAG, "AudioRecord failed to initialize (state != STATE_INITIALIZED)")
-                try {
-                    platformRecord.release()
-                } catch (t: Throwable) {
-                    Log.w(TAG, "Error releasing uninitialized AudioRecord", t)
-                } finally {
-                    try {
-                        sessionProjection?.stop()
-                    } catch (t: Throwable) {
-                        Log.w(TAG, "Error stopping session MediaProjection after initialization failure", t)
-                    }
-                }
+                cleanupUninitializedRecord(
+                    releaseRecord = { platformRecord.release() },
+                    stopProjection = { sessionProjection?.stop() }
+                )
                 return
             }
 

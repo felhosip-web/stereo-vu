@@ -382,34 +382,29 @@ class AudioRecordLifecycleStateTest {
 
     @Test
     fun testInitializationFailureStopsProjectionEvenIfReleaseThrows() {
-        val projectionStopped = AtomicBoolean(false)
+        // Tests the actual production FloatingVuService.cleanupUninitializedRecord helper
+        val ownProjectionStopped = AtomicBoolean(false)
+        val otherProjectionStopped = AtomicBoolean(false)
         val releaseAttempted = AtomicBoolean(false)
 
-        val failingRecord = object : IAudioRecord {
-            override val state: Int = 0 // STATE_UNINITIALIZED
-            override val recordingState: Int = 1
-            override fun startRecording() {}
-            override fun read(audioData: ShortArray, offsetInShorts: Int, sizeInShorts: Int): Int = 0
-            override fun stop() {}
-            override fun release() {
-                releaseAttempted.set(true)
-                throw RuntimeException("Simulated native release failure")
-            }
+        val releaseRecordAction = {
+            releaseAttempted.set(true)
+            throw RuntimeException("Simulated native AudioRecord release failure")
         }
 
-        // Simulate the initialization check pattern from FloatingVuService
-        if (failingRecord.state != 1 /* STATE_INITIALIZED */) {
-            try {
-                failingRecord.release()
-            } catch (t: Throwable) {
-                // Expected to catch release error
-            } finally {
-                projectionStopped.set(true)
-            }
+        val stopOwnProjectionAction = {
+            ownProjectionStopped.set(true)
         }
 
-        assertTrue("Release must be attempted", releaseAttempted.get())
-        assertTrue("Projection must be stopped despite release throwing an exception", projectionStopped.get())
+        // Directly invoke production cleanup helper
+        FloatingVuService.cleanupUninitializedRecord(
+            releaseRecord = releaseRecordAction,
+            stopProjection = stopOwnProjectionAction
+        )
+
+        assertTrue("Production cleanup must invoke AudioRecord release", releaseAttempted.get())
+        assertTrue("Production cleanup must stop session MediaProjection even if release throws", ownProjectionStopped.get())
+        assertFalse("Production cleanup must strictly touch its own session projection", otherProjectionStopped.get())
     }
 
     @Test
