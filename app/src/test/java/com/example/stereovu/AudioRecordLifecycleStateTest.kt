@@ -281,6 +281,75 @@ class AudioRecordLifecycleStateTest {
     }
 
     @Test
+    fun testCannotRestartAlreadyReleasedSession() {
+        val mockRecord = MockAudioRecord()
+        val session = AudioCaptureSession(mockRecord) { _, _ -> }
+
+        assertTrue(session.start("TestInitialRun"))
+        session.stopAndAwait(500)
+
+        assertEquals("Session must be released after completion", 1, mockRecord.releaseCallCount.get())
+        assertFalse("Session must not be active", session.isActive)
+
+        // Attempting to restart an already released session must return false
+        val restarted = session.start("TestRestartRun")
+        assertFalse("Starting an already released session must return false", restarted)
+        assertFalse("Session must remain inactive", session.isActive)
+
+        // Must not execute any additional startRecording or release operations
+        assertEquals("startRecording must not be called again", 1, mockRecord.startRecordingCallCount.get())
+        assertEquals("release must not be called again", 1, mockRecord.releaseCallCount.get())
+    }
+
+    @Test
+    fun testStaleSessionCallbackDoesNotStopNewerSession() {
+        // Simulates the identity check pattern in FloatingVuService.onUnexpectedTermination
+        val captureLock = Any()
+        var currentSession: AudioCaptureSession? = null
+        val serviceStopped = AtomicBoolean(false)
+        val levelsReset = AtomicBoolean(false)
+
+        val record1 = MockAudioRecord()
+        val record2 = MockAudioRecord()
+
+        val session1 = AudioCaptureSession(record1) { _, _ -> }
+        val session2 = AudioCaptureSession(record2) { _, _ -> }
+
+        synchronized(captureLock) {
+            currentSession = session2
+        }
+
+        // Simulate session1 (an older/replaced session) firing its unexpected termination callback
+        fun onSessionTerminated(session: AudioCaptureSession) {
+            val isCurrent = synchronized(captureLock) {
+                if (currentSession === session) {
+                    currentSession = null
+                    true
+                } else {
+                    false
+                }
+            }
+            if (isCurrent) {
+                levelsReset.set(true)
+                serviceStopped.set(true)
+            }
+        }
+
+        onSessionTerminated(session1)
+
+        // Because session1 !== session2, active session2 must be preserved and no shutdown triggered
+        assertFalse("Service must NOT be stopped by obsolete session", serviceStopped.get())
+        assertFalse("Levels must NOT be reset by obsolete session", levelsReset.get())
+        assertSame("Active session must remain untouched", session2, currentSession)
+
+        // When the current active session2 terminates, it must properly trigger
+        onSessionTerminated(session2)
+        assertTrue("Service must be stopped by current session", serviceStopped.get())
+        assertTrue("Levels must be reset by current session", levelsReset.get())
+        assertNull("Current session reference must be cleared", currentSession)
+    }
+
+    @Test
     fun testInitializationFailureStopsProjectionEvenIfReleaseThrows() {
         val projectionStopped = AtomicBoolean(false)
         val releaseAttempted = AtomicBoolean(false)

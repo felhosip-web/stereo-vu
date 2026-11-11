@@ -242,18 +242,25 @@ class FloatingVuService : Service() {
                     Log.e(TAG, "Audio capture error: ${t.message}", t)
                 },
                 onUnexpectedTermination = {
-                    Log.w(TAG, "Audio capture worker terminated unexpectedly; clearing levels and stopping service")
-                    vuView?.post {
-                        vuView?.updateLevels(0f, 0f)
-                    }
-                    synchronized(captureLock) {
+                    val isCurrent = synchronized(captureLock) {
                         if (captureSession === session) {
                             captureSession = null
+                            true
+                        } else {
+                            false
                         }
                     }
-                    // Stop service on main thread so foreground service does not run indefinitely with dead capture worker
-                    android.os.Handler(android.os.Looper.getMainLooper()).post {
-                        stopSelf()
+                    if (isCurrent) {
+                        Log.w(TAG, "Active audio capture worker terminated unexpectedly; clearing levels and stopping service")
+                        vuView?.post {
+                            vuView?.updateLevels(0f, 0f)
+                        }
+                        // Stop service on main thread so foreground service does not run indefinitely with dead capture worker
+                        android.os.Handler(android.os.Looper.getMainLooper()).post {
+                            stopSelf()
+                        }
+                    } else {
+                        Log.i(TAG, "Ignoring unexpected termination callback from obsolete/replaced capture session")
                     }
                 }
             ) { record, isRunningPredicate ->

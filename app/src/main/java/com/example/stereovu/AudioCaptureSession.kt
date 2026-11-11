@@ -73,7 +73,7 @@ class AudioCaptureSession(
      */
     fun start(threadName: String = "StereoVuCaptureWorker"): Boolean {
         synchronized(sessionLock) {
-            if (isRunning.get() || (workerThread != null && workerThread!!.isAlive)) {
+            if (isReleased.get() || isRunning.get() || (workerThread != null && workerThread!!.isAlive)) {
                 return false
             }
             isRunning.set(true)
