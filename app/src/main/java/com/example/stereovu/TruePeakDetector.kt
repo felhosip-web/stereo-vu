@@ -3,11 +3,13 @@ package com.example.stereovu
 import kotlin.math.abs
 
 /**
- * 4x oversampling True Peak detector based on polyphase FIR interpolation
- * compliant with ITU-R BS.1770 recommendations.
- *
- * It reconstructs inter-sample peaks between sampled values across consecutive
+ * 4x oversampling True Peak detector based on polyphase FIR interpolation.
+ * Reconstructs inter-sample peaks between sampled values across consecutive
  * audio frames and preserves filter delay history across buffer boundaries.
+ *
+ * Note: This provides a custom 4× oversampled inter-sample peak estimate.
+ * The polyphase FIR filter coefficients differ from the reference design in
+ * ITU-R BS.1770-5 Annex 2, and formal standards compliance is unverified.
  */
 class TruePeakDetector {
     companion object {

@@ -52,6 +52,11 @@ class TruePeakDetector:
         self.delay_l = np.zeros(TAPS, dtype=np.float64)
         self.delay_r = np.zeros(TAPS, dtype=np.float64)
         self.head = 0
+        # Precomputed circular index lookup table of shape (12, 12)
+        # Avoids per-sample np.arange() allocations in process_sample()
+        self._idx_table = np.array([[(head - k) % TAPS for k in range(TAPS)] for head in range(TAPS)], dtype=np.intp)
+        # 12x3 matrix combining all 3 reconstruction phases for single-pass dot product
+        self._phases = np.column_stack([PHASE_1, PHASE_2, PHASE_3])
 
     def reset(self):
         """Reset internal filter delay lines."""
@@ -66,25 +71,16 @@ class TruePeakDetector:
         self.delay_l[self.head] = s_l
         self.delay_r[self.head] = s_r
 
-        max_l = abs(s_l)
-        max_r = abs(s_r)
-
-        # Build ordered history slice: newest to oldest tap
-        # k=0 is most recent sample (head), k=11 is oldest
-        idx = (self.head - np.arange(TAPS)) % TAPS
+        # Retrieve ordered history (newest to oldest) via precomputed index
+        idx = self._idx_table[self.head]
         hist_l = self.delay_l[idx]
         hist_r = self.delay_r[idx]
 
-        p1_l = abs(np.dot(hist_l, PHASE_1))
-        p2_l = abs(np.dot(hist_l, PHASE_2))
-        p3_l = abs(np.dot(hist_l, PHASE_3))
+        p_l = np.abs(np.dot(hist_l, self._phases))
+        p_r = np.abs(np.dot(hist_r, self._phases))
 
-        p1_r = abs(np.dot(hist_r, PHASE_1))
-        p2_r = abs(np.dot(hist_r, PHASE_2))
-        p3_r = abs(np.dot(hist_r, PHASE_3))
-
-        max_l = max(max_l, p1_l, p2_l, p3_l)
-        max_r = max(max_r, p1_r, p2_r, p3_r)
+        max_l = max(abs(s_l), float(p_l[0]), float(p_l[1]), float(p_l[2]))
+        max_r = max(abs(s_r), float(p_r[0]), float(p_r[1]), float(p_r[2]))
 
         self.head = (self.head + 1) % TAPS
         return max_l, max_r
@@ -92,20 +88,43 @@ class TruePeakDetector:
     def process_buffer(self, samples_l: np.ndarray, samples_r: np.ndarray):
         """
         Process arrays of samples for left and right channels, preserving history.
+        Vectorized via np.convolve across chunks for high performance in real-time callbacks.
         Returns (true_peak_l, true_peak_r).
         """
         n = len(samples_l)
         if n == 0:
             return 0.0, 0.0
 
+        # Extract last TAPS - 1 samples in oldest-to-newest order for prepending
+        hist_idx = [(self.head - (TAPS - 1) + k) % TAPS for k in range(TAPS - 1)]
+        hist_l = self.delay_l[hist_idx]
+        hist_r = self.delay_r[hist_idx]
+
+        full_l = np.concatenate([hist_l, samples_l])
+        full_r = np.concatenate([hist_r, samples_r])
+
+        # Maintain exact internal delay buffer state continuity
+        if n >= TAPS:
+            self.delay_l[:] = full_l[-TAPS:]
+            self.delay_r[:] = full_r[-TAPS:]
+            self.head = 0
+        else:
+            for i in range(n):
+                self.delay_l[self.head] = samples_l[i]
+                self.delay_r[self.head] = samples_r[i]
+                self.head = (self.head + 1) % TAPS
+
         peak_l = float(np.max(np.abs(samples_l)))
         peak_r = float(np.max(np.abs(samples_r)))
 
-        for i in range(n):
-            s_peak_l, s_peak_r = self.process_sample(float(samples_l[i]), float(samples_r[i]))
-            if s_peak_l > peak_l:
-                peak_l = s_peak_l
-            if s_peak_r > peak_r:
-                peak_r = s_peak_r
+        for phase in (PHASE_1, PHASE_2, PHASE_3):
+            c_l = np.abs(np.convolve(full_l, phase, mode='valid'))
+            c_r = np.abs(np.convolve(full_r, phase, mode='valid'))
+            m_l = float(np.max(c_l))
+            m_r = float(np.max(c_r))
+            if m_l > peak_l:
+                peak_l = m_l
+            if m_r > peak_r:
+                peak_r = m_r
 
         return peak_l, peak_r
