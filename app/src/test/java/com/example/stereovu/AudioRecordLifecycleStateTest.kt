@@ -242,6 +242,29 @@ class AudioRecordLifecycleStateTest {
     }
 
     @Test
+    fun testStartedCallbackRunsAfterRecorderEntersRecordingState() {
+        val mockRecord = MockAudioRecord()
+        val startedLatch = CountDownLatch(1)
+        val startedAfterRecorder = AtomicBoolean(false)
+        val session = AudioCaptureSession(
+            record = mockRecord,
+            onStarted = {
+                startedAfterRecorder.set(mockRecord.recordingState == 3)
+                startedLatch.countDown()
+            }
+        ) { _, isRunning ->
+            while (isRunning()) {
+                Thread.sleep(5)
+            }
+        }
+
+        assertTrue(session.start("TestStartedCallback"))
+        assertTrue(startedLatch.await(1, TimeUnit.SECONDS))
+        assertTrue("Source status is reported only after recording starts", startedAfterRecorder.get())
+        assertTrue(session.stopAndAwait(1000))
+    }
+
+    @Test
     fun testPerSessionResourceOwnershipDoesNotAffectNewerSession() {
         // Simulates two consecutive sessions, ensuring old session cleanup cannot stop newer session resources
         val oldResourceStopCount = AtomicInteger(0)
@@ -405,6 +428,29 @@ class AudioRecordLifecycleStateTest {
         assertTrue("Production cleanup must invoke AudioRecord release", releaseAttempted.get())
         assertTrue("Production cleanup must stop session MediaProjection even if release throws", ownProjectionStopped.get())
         assertFalse("Production cleanup must strictly touch its own session projection", otherProjectionStopped.get())
+    }
+
+    @Test
+    fun testProjectionStopDetachesAndReleasesItsCaptureSession() {
+        val mockRecord = MockAudioRecord()
+        val coordinator = CaptureSessionCoordinator(
+            mainThreadPoster = {},
+            resetLevelsAction = {},
+            stopServiceAction = {}
+        )
+        val session = AudioCaptureSession(mockRecord) { _, isRunning ->
+            while (isRunning()) {
+                Thread.sleep(5)
+            }
+        }
+
+        coordinator.attachSession(session)
+        assertTrue(session.start("TestProjectionStop"))
+
+        assertSame(session, coordinator.detachForProjectionStop(session))
+        assertNull(coordinator.currentSession)
+        assertTrue(session.stopAndAwait(1000))
+        assertEquals("Projection termination must release the record", 1, mockRecord.releaseCallCount.get())
     }
 
     @Test
