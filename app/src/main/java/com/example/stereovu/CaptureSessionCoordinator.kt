@@ -84,4 +84,16 @@ class CaptureSessionCoordinator(
             return session
         }
     }
+
+    /**
+     * Detaches the current session when its owning MediaProjection is stopped.
+     */
+    fun detachForProjectionStop(session: AudioCaptureSession): AudioCaptureSession? {
+        synchronized(lock) {
+            if (currentSession !== session) return null
+            currentSession = null
+            currentGeneration++
+            return session
+        }
+    }
 }

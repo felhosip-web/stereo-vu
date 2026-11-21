@@ -35,6 +35,7 @@ class AudioCaptureSession(
     private val record: IAudioRecord,
     private val onError: ((Throwable) -> Unit)? = null,
     private val onUnexpectedTermination: (() -> Unit)? = null,
+    private val onStarted: (() -> Unit)? = null,
     private val loopBody: (record: IAudioRecord, isRunning: () -> Boolean) -> Unit
 ) {
     companion object {
@@ -86,6 +87,7 @@ class AudioCaptureSession(
                             record.startRecording()
                         }
                     }
+                    onStarted?.invoke()
                     loopBody(record) { isRunning.get() && !Thread.currentThread().isInterrupted }
                 } catch (t: Throwable) {
                     logE("Unexpected exception in audio capture worker", t)

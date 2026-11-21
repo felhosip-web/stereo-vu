@@ -12,6 +12,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.util.Log
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -22,8 +23,13 @@ class MainActivity : Activity() {
     private val REQ_OVERLAY = 1001
     private val REQ_AUDIO = 1002
     private val REQ_CAPTURE = 1003
+    private var pendingCaptureSource: AudioCaptureSource? = null
     private var mediaProjectionManager: MediaProjectionManager? = null
     private lateinit var prefs: SharedPreferences
+
+    companion object {
+        private const val TAG = "MainActivity"
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -605,6 +611,46 @@ class MainActivity : Activity() {
             prefKey = "amplitude_count"
         )
 
+        val sourceLabel = TextView(this).apply {
+            text = "Hangforrás"
+            setTextColor(Color.parseColor("#E0E0E0"))
+            textSize = 14f
+            setPadding(0, 10, 0, 6)
+        }
+        sec4.addView(sourceLabel)
+
+        val internalSourceId = View.generateViewId()
+        val microphoneSourceId = View.generateViewId()
+        val sourceGroup = RadioGroup(this).apply {
+            orientation = RadioGroup.VERTICAL
+            addView(RadioButton(this@MainActivity).apply {
+                id = internalSourceId
+                text = "Belső lejátszás hangja (alapértelmezett)"
+                setTextColor(Color.parseColor("#E0E0E0"))
+            })
+            addView(RadioButton(this@MainActivity).apply {
+                id = microphoneSourceId
+                text = "Mikrofon (csak kifejezett választásra)"
+                setTextColor(Color.parseColor("#E0E0E0"))
+            })
+            layoutParams = layoutParamsMatch
+        }
+        val savedSource = AudioCaptureSource.fromPreferenceValue(
+            prefs.getString("audio_capture_source", AudioCaptureSource.INTERNAL_PLAYBACK.preferenceValue)
+        ) ?: AudioCaptureSource.INTERNAL_PLAYBACK
+        sourceGroup.check(
+            if (savedSource == AudioCaptureSource.MICROPHONE) microphoneSourceId else internalSourceId
+        )
+        sourceGroup.setOnCheckedChangeListener { _, checkedId ->
+            val source = when (checkedId) {
+                internalSourceId -> AudioCaptureSource.INTERNAL_PLAYBACK
+                microphoneSourceId -> AudioCaptureSource.MICROPHONE
+                else -> return@setOnCheckedChangeListener
+            }
+            prefs.edit().putString("audio_capture_source", source.preferenceValue).apply()
+        }
+        sec4.addView(sourceGroup)
+
         container.addView(sec4)
 
         // Gombok layout paraméterei
@@ -754,6 +800,13 @@ class MainActivity : Activity() {
     }
 
     private fun checkPermissions() {
+        val source = selectedAudioSource()
+        if (source == null) {
+            showError(AudioCaptureRequestError.MISSING_SOURCE.userMessage)
+            return
+        }
+        pendingCaptureSource = source
+
         if (!Settings.canDrawOverlays(this)) {
             val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
             startActivityForResult(intent, REQ_OVERLAY)
@@ -763,40 +816,102 @@ class MainActivity : Activity() {
             requestPermissions(arrayOf(android.Manifest.permission.RECORD_AUDIO), REQ_AUDIO)
             return
         }
-        requestCapture()
+        requestCapture(source)
     }
 
-    private fun requestCapture() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            val intent = mediaProjectionManager?.createScreenCaptureIntent()
-            if (intent != null) {
-                startActivityForResult(intent, REQ_CAPTURE)
+    private fun selectedAudioSource(): AudioCaptureSource? =
+        AudioCaptureSource.fromPreferenceValue(
+            prefs.getString("audio_capture_source", AudioCaptureSource.INTERNAL_PLAYBACK.preferenceValue)
+        )
+
+    private fun requestCapture(source: AudioCaptureSource) {
+        if (source == AudioCaptureSource.MICROPHONE) {
+            startVuService(source)
+            return
+        }
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            showError(AudioCaptureRequestError.INTERNAL_CAPTURE_UNSUPPORTED.userMessage)
+            return
+        }
+        val manager = mediaProjectionManager
+        if (manager == null) {
+            Log.e(TAG, "MediaProjectionManager unavailable for internal audio capture")
+            showError("A belső hangrögzítés szolgáltatása nem érhető el ezen az eszközön.")
+            return
+        }
+        val intent = try {
+            manager.createScreenCaptureIntent()
+        } catch (e: RuntimeException) {
+            Log.e(TAG, "Failed to create MediaProjection consent request", e)
+            showError("Nem sikerült elindítani a belső hangrögzítés engedélykérését.")
+            return
+        }
+        if (intent == null) {
+            Log.e(TAG, "MediaProjection consent intent unavailable")
+            showError("Nem sikerült elindítani a belső hangrögzítés engedélykérését.")
+            return
+        }
+        startActivityForResult(intent, REQ_CAPTURE)
+    }
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode != REQ_AUDIO) return
+
+        if (grantResults.firstOrNull() == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+            val source = pendingCaptureSource
+            if (source == null) {
+                showError(AudioCaptureRequestError.MISSING_SOURCE.userMessage)
             } else {
-                startVuService(null)
+                requestCapture(source)
             }
         } else {
-            startVuService(null)
+            Log.w(TAG, "RECORD_AUDIO permission denied")
+            showError("A hangrögzítési engedély szükséges a kiválasztott hangforráshoz.")
         }
     }
 
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQ_OVERLAY) checkPermissions()
-        if (requestCode == REQ_CAPTURE) {
-            if (resultCode == Activity.RESULT_OK) {
-                startVuService(data)
-            } else {
-                Toast.makeText(this, "Belső hang engedély kell a Bluetooth-hoz!", Toast.LENGTH_LONG).show()
-                startVuService(null)
-            }
+        if (requestCode == REQ_OVERLAY) {
+            checkPermissions()
+            return
         }
+        if (requestCode != REQ_CAPTURE) return
+
+        if (resultCode != Activity.RESULT_OK) {
+            Log.i(TAG, "MediaProjection consent denied (resultCode=$resultCode)")
+            showError(AudioCaptureRequestError.PROJECTION_CONSENT_DENIED.userMessage)
+            return
+        }
+        if (data == null) {
+            Log.e(TAG, "MediaProjection returned RESULT_OK without result data")
+            showError(AudioCaptureRequestError.PROJECTION_RESULT_MISSING.userMessage)
+            return
+        }
+        Log.i(TAG, "MediaProjection consent granted; result data present")
+        startVuService(AudioCaptureSource.INTERNAL_PLAYBACK, resultCode, data)
     }
 
-    private fun startVuService(captureIntent: Intent?) {
+    private fun startVuService(
+        source: AudioCaptureSource,
+        resultCode: Int? = null,
+        captureIntent: Intent? = null
+    ) {
         val svc = Intent(this, FloatingVuService::class.java).apply {
-            putExtra("captureIntent", captureIntent)
+            putExtra(FloatingVuService.EXTRA_AUDIO_SOURCE, source.preferenceValue)
+            resultCode?.let { putExtra(FloatingVuService.EXTRA_PROJECTION_RESULT_CODE, it) }
+            captureIntent?.let { putExtra(FloatingVuService.EXTRA_CAPTURE_INTENT, it) }
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(svc) else startService(svc)
-        Toast.makeText(this, "VU elindítva! Most nyisd meg a YouTube-ot", Toast.LENGTH_LONG).show()
+        Toast.makeText(this, "Hangforrás indítása: ${source.displayName}", Toast.LENGTH_LONG).show()
+    }
+
+    private fun showError(message: String) {
+        Toast.makeText(this, message, Toast.LENGTH_LONG).show()
     }
 }

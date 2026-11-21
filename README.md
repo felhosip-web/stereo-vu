@@ -12,5 +12,5 @@
 - Lebegő ablak YouTube felett
 - 2x20 LED, 17 zöld + 3 piros
 - Peak hold 0.9s + lassú visszaesés
-- Belső hang Playback Capture -> Bluetooth fülessel is megy sztereóban
+- Android 10+ belső hang Playback Capture (engedélyköteles); a mikrofon külön, kifejezetten választható hangforrás. Android 10 előtti rendszereken csak a mikrofon használható.
 - True Peak mérési mód: egyedi 4×-es túlmintavételezett interpolációs csúcsérték-becslés (polyphase FIR szűrő inter-sample túllövések detektálására; a szűrőegyütthatók eltérnek az ITU-R BS.1770-5 2. mellékletének referencia-szűrőjétől)

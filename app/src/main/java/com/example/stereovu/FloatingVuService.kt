@@ -9,20 +9,24 @@ import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
 import android.media.AudioRecord
+import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
 import android.util.Log
 import android.view.Gravity
 import android.view.WindowManager
+import android.widget.Toast
 import java.util.concurrent.atomic.AtomicBoolean
-import kotlin.concurrent.thread
 import kotlin.math.sqrt
 
 class FloatingVuService : Service() {
     companion object {
         private const val TAG = "FloatingVuService"
         private const val WORKER_JOIN_TIMEOUT_MS = 1000L
+        internal const val EXTRA_AUDIO_SOURCE = "audioCaptureSource"
+        internal const val EXTRA_PROJECTION_RESULT_CODE = "projectionResultCode"
+        internal const val EXTRA_CAPTURE_INTENT = "captureIntent"
 
         internal fun cleanupUninitializedRecord(
             releaseRecord: () -> Unit,
@@ -57,6 +61,8 @@ class FloatingVuService : Service() {
     @Volatile private var detectionMode = 0 // 0 = Peak, 1 = RMS
     @Volatile private var ballisticsMode = 0 // 0..7 (3 = True Peak)
     @Volatile private var rmsWindowMs = 350 // Default 350 ms (50 - 1000 ms)
+    @Volatile private var activeProjection: MediaProjection? = null
+    private val captureFailureReported = AtomicBoolean(false)
     private val truePeakDetector = TruePeakDetector()
 
     internal val coordinator = CaptureSessionCoordinator(
@@ -85,7 +91,6 @@ class FloatingVuService : Service() {
         rmsWindowMs = prefs.getInt("rms_window_ms", 350).coerceIn(50, 1000)
         prefs.registerOnSharedPreferenceChangeListener(prefListener)
         
-        startForegroundNotification()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -93,7 +98,34 @@ class FloatingVuService : Service() {
             stopSelf()
             return START_NOT_STICKY
         }
-        val captureIntent = intent?.getParcelableExtra<Intent>("captureIntent")
+        val source = AudioCaptureSource.fromPreferenceValue(
+            intent?.getStringExtra(EXTRA_AUDIO_SOURCE)
+        )
+        val resultCode = if (intent?.hasExtra(EXTRA_PROJECTION_RESULT_CODE) == true) {
+            intent.getIntExtra(EXTRA_PROJECTION_RESULT_CODE, Int.MIN_VALUE)
+        } else {
+            null
+        }
+        val captureIntent = getCaptureIntent(intent)
+        Log.i(
+            TAG,
+            "Capture request source=${source?.preferenceValue ?: "missing"}, " +
+                "resultCodePresent=${resultCode != null}, captureIntentPresent=${captureIntent != null}"
+        )
+        val requestError = validateAudioCaptureRequest(
+            source = source,
+            sdkInt = Build.VERSION.SDK_INT,
+            resultCode = resultCode,
+            hasCaptureIntent = captureIntent != null
+        )
+        if (requestError != null) {
+            Log.e(TAG, "Rejecting capture request: ${requestError.name}")
+            reportCaptureFailure(requestError.userMessage)
+            stopSelf(startId)
+            return START_NOT_STICKY
+        }
+        val requestedSource = requireNotNull(source)
+        startForegroundNotification(requestedSource)
         
         val prefs = getSharedPreferences("StereoVuPrefs", Context.MODE_PRIVATE)
         amplitudeCount = prefs.getInt("amplitude_count", 32767).toDouble()
@@ -102,16 +134,54 @@ class FloatingVuService : Service() {
         rmsWindowMs = prefs.getInt("rms_window_ms", 350).coerceIn(50, 1000)
         
         showOverlay()
-        startAudioCapture(captureIntent)
-        return START_STICKY
+        startAudioCapture(requestedSource, resultCode, captureIntent)
+        return START_NOT_STICKY
     }
 
-    private fun startForegroundNotification() {
+    @Suppress("DEPRECATION")
+    private fun getCaptureIntent(intent: Intent?): Intent? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            intent?.getParcelableExtra(EXTRA_CAPTURE_INTENT, Intent::class.java)
+        } else {
+            intent?.getParcelableExtra(EXTRA_CAPTURE_INTENT)
+        }
+
+    private fun startForegroundNotification(source: AudioCaptureSource) {
         val channelId = "vu_channel"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val ch = NotificationChannel(channelId, "VU Meter", NotificationManager.IMPORTANCE_LOW)
             (getSystemService(NotificationManager::class.java)).createNotificationChannel(ch)
         }
+        val notif = buildNotification(source.activeStatusMessage())
+        when {
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.R -> {
+                val type = if (source == AudioCaptureSource.INTERNAL_PLAYBACK) {
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                } else {
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+                }
+                startForeground(1, notif, type)
+            }
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q &&
+                source == AudioCaptureSource.INTERNAL_PLAYBACK -> {
+                startForeground(
+                    1,
+                    notif,
+                    android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+                )
+            }
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q -> {
+                startForeground(1, notif, 0)
+            }
+            else -> startForeground(1, notif)
+        }
+    }
+
+    private fun updateCaptureNotification(text: String) {
+        getSystemService(NotificationManager::class.java).notify(1, buildNotification(text))
+    }
+
+    private fun buildNotification(text: String): Notification {
         val stopIntent = Intent(this, FloatingVuService::class.java).apply {
             action = "ACTION_STOP"
         }
@@ -119,22 +189,30 @@ class FloatingVuService : Service() {
             this,
             0,
             stopIntent,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT else PendingIntent.FLAG_UPDATE_CURRENT
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
         )
-        val notif = Notification.Builder(this, channelId)
+        return Notification.Builder(this, "vu_channel")
             .setContentTitle("Stereo VU aktív")
-            .setContentText("Érintsd meg a leállításhoz")
+            .setContentText(text)
             .setSmallIcon(android.R.drawable.ic_media_play)
             .setContentIntent(pendingIntent)
             .build()
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            var type = android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            if (Build.VERSION.SDK_INT >= 34) {
-                type = type or android.content.pm.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-            }
-            startForeground(1, notif, type)
+    }
+
+    private fun reportCaptureFailure(message: String, error: Throwable? = null) {
+        if (!captureFailureReported.compareAndSet(false, true)) return
+        if (error == null) {
+            Log.e(TAG, message)
         } else {
-            startForeground(1, notif)
+            Log.e(TAG, message, error)
+        }
+        mainHandler.post {
+            Toast.makeText(applicationContext, message, Toast.LENGTH_LONG).show()
+            stopSelf()
         }
     }
 
@@ -160,77 +238,120 @@ class FloatingVuService : Service() {
     private data class PlatformAudioCaptureResources(
         val record: AudioRecord,
         val sampleRate: Int,
-        val projection: android.media.projection.MediaProjection?
+        val projection: MediaProjection?,
+        val projectionCallback: MediaProjection.Callback?
     )
 
-    private fun createPlatformAudioRecord(captureIntent: Intent?): PlatformAudioCaptureResources? {
-        val sampleRate = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && captureIntent != null) 48000 else 44100
-        var projection: android.media.projection.MediaProjection? = null
+    private class CaptureInitializationException(message: String, cause: Throwable) :
+        Exception(message, cause)
 
-        return try {
-            val record = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q && captureIntent != null) {
-                val mgr = getSystemService(MediaProjectionManager::class.java)
-                val proj = mgr?.getMediaProjection(-1, captureIntent)
-                if (proj == null) {
-                    Log.e(TAG, "MediaProjection not available")
-                    return null
+    private fun createPlatformAudioRecord(
+        source: AudioCaptureSource,
+        resultCode: Int?,
+        captureIntent: Intent?
+    ): PlatformAudioCaptureResources {
+        val sampleRate = if (source == AudioCaptureSource.INTERNAL_PLAYBACK) 48000 else 44100
+        var projection: MediaProjection? = null
+        var projectionCallback: MediaProjection.Callback? = null
+
+        try {
+            val record = createRecordForSource(
+                source = source,
+                createInternalPlaybackRecord = {
+                    val manager = getSystemService(MediaProjectionManager::class.java)
+                        ?: throw IllegalStateException("MediaProjectionManager unavailable")
+                    val mediaProjection = manager.getMediaProjection(
+                        requireNotNull(resultCode),
+                        requireNotNull(captureIntent)
+                    ) ?: throw IllegalStateException("MediaProjection was not granted")
+                    projection = mediaProjection
+                    val callback = object : MediaProjection.Callback() {
+                        override fun onStop() {
+                            handleProjectionStopped(mediaProjection)
+                        }
+                    }
+                    mediaProjection.registerCallback(callback, mainHandler)
+                    projectionCallback = callback
+                    val config = AudioPlaybackCaptureConfiguration.Builder(mediaProjection)
+                        .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
+                        .addMatchingUsage(AudioAttributes.USAGE_GAME)
+                        .build()
+                    val format = AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_IN_STEREO)
+                        .build()
+                    AudioRecord.Builder()
+                        .setAudioFormat(format)
+                        .setAudioPlaybackCaptureConfig(config)
+                        .setBufferSizeInBytes(8192)
+                        .build()
+                },
+                createMicrophoneRecord = {
+                    val format = AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(sampleRate)
+                        .setChannelMask(AudioFormat.CHANNEL_IN_STEREO)
+                        .build()
+                    AudioRecord.Builder()
+                        .setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
+                        .setAudioFormat(format)
+                        .setBufferSizeInBytes(8192)
+                        .build()
                 }
-                projection = proj
-                val config = AudioPlaybackCaptureConfiguration.Builder(proj)
-                    .addMatchingUsage(AudioAttributes.USAGE_MEDIA)
-                    .addMatchingUsage(AudioAttributes.USAGE_GAME)
-                    .build()
-                val format = AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(sampleRate)
-                    .setChannelMask(AudioFormat.CHANNEL_IN_STEREO)
-                    .build()
-                AudioRecord.Builder()
-                    .setAudioFormat(format)
-                    .setAudioPlaybackCaptureConfig(config)
-                    .setBufferSizeInBytes(8192)
-                    .build()
-            } else {
-                val format = AudioFormat.Builder()
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setSampleRate(sampleRate)
-                    .setChannelMask(AudioFormat.CHANNEL_IN_STEREO)
-                    .build()
-                AudioRecord.Builder()
-                    .setAudioSource(android.media.MediaRecorder.AudioSource.MIC)
-                    .setAudioFormat(format)
-                    .setBufferSizeInBytes(8192)
-                    .build()
-            }
-            PlatformAudioCaptureResources(record, sampleRate, projection)
+            )
+            return PlatformAudioCaptureResources(record, sampleRate, projection, projectionCallback)
         } catch (e: Exception) {
-            Log.e(TAG, "Error constructing AudioRecord", e)
+            try {
+                projectionCallback?.let { projection?.unregisterCallback(it) }
+            } catch (unregisterError: Throwable) {
+                Log.w(TAG, "Error unregistering MediaProjection after creation failure", unregisterError)
+            }
             try {
                 projection?.stop()
-            } catch (t: Throwable) {
-                Log.w(TAG, "Error stopping MediaProjection after creation failure", t)
+            } catch (stopError: Throwable) {
+                Log.w(TAG, "Error stopping MediaProjection after creation failure", stopError)
             }
-            null
+            throw CaptureInitializationException(
+                source.failureMessage(AudioCaptureFailureStage.INITIALIZATION),
+                e
+            )
         }
     }
 
-    private fun startAudioCapture(captureIntent: Intent?) {
+    private fun startAudioCapture(
+        source: AudioCaptureSource,
+        resultCode: Int?,
+        captureIntent: Intent?
+    ) {
         synchronized(coordinator.lock) {
             if (coordinator.currentSession?.isActive == true) {
                 return
             }
 
-            val resources = createPlatformAudioRecord(captureIntent) ?: return
+            val resources = try {
+                createPlatformAudioRecord(source, resultCode, captureIntent)
+            } catch (e: CaptureInitializationException) {
+                reportCaptureFailure(e.message ?: "Hangrögzítési hiba.", e)
+                return
+            }
             val platformRecord = resources.record
             val sampleRate = resources.sampleRate
             val sessionProjection = resources.projection
+            val sessionProjectionCallback = resources.projectionCallback
 
             if (platformRecord.state != AudioRecord.STATE_INITIALIZED) {
                 Log.e(TAG, "AudioRecord failed to initialize (state != STATE_INITIALIZED)")
+                try {
+                    sessionProjectionCallback?.let { sessionProjection?.unregisterCallback(it) }
+                } catch (unregisterError: Throwable) {
+                    Log.w(TAG, "Error unregistering MediaProjection after AudioRecord initialization failure", unregisterError)
+                }
                 cleanupUninitializedRecord(
                     releaseRecord = { platformRecord.release() },
                     stopProjection = { sessionProjection?.stop() }
                 )
+                reportCaptureFailure(source.failureMessage(AudioCaptureFailureStage.INITIALIZATION))
                 return
             }
 
@@ -250,6 +371,11 @@ class FloatingVuService : Service() {
                         platformRecord.release()
                     } finally {
                         try {
+                            sessionProjectionCallback?.let { sessionProjection?.unregisterCallback(it) }
+                        } catch (t: Throwable) {
+                            Log.w(TAG, "Error unregistering MediaProjection callback", t)
+                        }
+                        try {
                             sessionProjection?.stop()
                         } catch (t: Throwable) {
                             Log.w(TAG, "Error stopping session MediaProjection", t)
@@ -263,11 +389,29 @@ class FloatingVuService : Service() {
             session = AudioCaptureSession(
                 record = recordAdapter,
                 onError = { t ->
-                    Log.e(TAG, "Audio capture error: ${t.message}", t)
+                    reportCaptureFailure(
+                        source.failureMessage(AudioCaptureFailureStage.RUNTIME),
+                        t
+                    )
                 },
                 onUnexpectedTermination = {
                     session?.let { s ->
                         coordinator.onSessionUnexpectedTermination(s, sessionGeneration)
+                    }
+                    if (!captureFailureReported.get()) {
+                        reportCaptureFailure("A hangrögzítési munkamenet váratlanul leállt.")
+                    }
+                },
+                onStarted = {
+                    mainHandler.post {
+                        if (coordinator.currentSession === session) {
+                            updateCaptureNotification(source.activeStatusMessage())
+                            Toast.makeText(
+                                applicationContext,
+                                "Aktív hangforrás: ${source.displayName}",
+                                Toast.LENGTH_SHORT
+                            ).show()
+                        }
                     }
                 }
             ) { record, isRunningPredicate ->
@@ -407,21 +551,39 @@ class FloatingVuService : Service() {
                             else ->
                                 Log.e(TAG, "AudioRecord.read returned unhandled error: $read")
                         }
-                        // Do not enter an uncontrolled retry loop on terminal errors
-                        break
+                        throw IllegalStateException("AudioRecord.read failed with code $read")
                     }
                 }
             }
 
             sessionGeneration = coordinator.attachSession(session)
-            session.start("StereoVuAudioCapture")
+            activeProjection = sessionProjection
+            if (!requireNotNull(session).start("StereoVuAudioCapture")) {
+                activeProjection = null
+                coordinator.detachForProjectionStop(requireNotNull(session))
+                requireNotNull(session).stopAndAwait(WORKER_JOIN_TIMEOUT_MS)
+                reportCaptureFailure("A hangrögzítési munkamenet nem indítható el.")
+            }
         }
+    }
+
+    private fun handleProjectionStopped(projection: MediaProjection) {
+        if (activeProjection !== projection) return
+        Log.i(TAG, "MediaProjection stopped by the system or user")
+        activeProjection = null
+        coordinator.currentSession
+            ?.let { coordinator.detachForProjectionStop(it) }
+            ?.stopAndAwait(WORKER_JOIN_TIMEOUT_MS)
+        reportCaptureFailure(
+            "A belső hang rögzítési engedélye megszűnt. Indítsd újra a rögzítést."
+        )
     }
 
     override fun onDestroy() {
         val prefs = getSharedPreferences("StereoVuPrefs", Context.MODE_PRIVATE)
         prefs.unregisterOnSharedPreferenceChangeListener(prefListener)
 
+        activeProjection = null
         val sessionToStop = coordinator.detachForShutdown()
 
         // Bounded wait for worker thread termination outside lock
