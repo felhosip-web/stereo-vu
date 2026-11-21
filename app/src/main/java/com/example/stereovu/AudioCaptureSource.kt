@@ -38,7 +38,7 @@ internal fun AudioCaptureSource.failureMessage(stage: AudioCaptureFailureStage):
     when (this) {
         AudioCaptureSource.INTERNAL_PLAYBACK -> when (stage) {
             AudioCaptureFailureStage.INITIALIZATION ->
-                "A belső hang rögzítése nem indítható el. Ellenőrizd az engedélyt és próbáld újra."
+                "A belső hang rögzítése nem indítható el. A mikrofon nem indul el. Ellenőrizd az engedélyt és próbáld újra."
             AudioCaptureFailureStage.RUNTIME ->
                 "A belső hangrögzítés megszakadt. A mikrofon nem indul el."
         }

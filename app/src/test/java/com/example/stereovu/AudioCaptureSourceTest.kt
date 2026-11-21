@@ -139,7 +139,7 @@ class AudioCaptureSourceTest {
         assertTrue(
             AudioCaptureSource.INTERNAL_PLAYBACK
                 .failureMessage(AudioCaptureFailureStage.INITIALIZATION)
-                .contains("mikrofon nem indul el")
+                .contains("A mikrofon nem indul el")
         )
         assertFalse(
             AudioCaptureSource.MICROPHONE
